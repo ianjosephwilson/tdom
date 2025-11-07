@@ -29,10 +29,13 @@ class NodeParser(HTMLParser):
         self.root = Fragment(children=[])
         self.stack = []
 
+    def handle_attrs(self, tag: str, attrs: t.Sequence[tuple[str, str | None]]) -> dict[str, object|None]:
+        return LastUpdatedOrderedDict(attrs)
+
     def handle_starttag(
         self, tag: str, attrs: t.Sequence[tuple[str, str | None]]
     ) -> None:
-        node = Element(tag, attrs=LastUpdatedOrderedDict(attrs), children=[])
+        node = Element(tag, attrs=self.handle_attrs(tag, attrs), children=[])
         self.stack.append(node)
 
         # Unfortunately, Python's built-in HTMLParser has inconsistent behavior
