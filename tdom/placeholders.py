@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import re
 import random
 import string
-from string.templatelib import Interpolation
+from string.templatelib import Interpolation, Template
 import typing as t
 
 from .formatting import format_interpolation
@@ -89,3 +89,35 @@ def _replace_placeholders(
         for match in matches
     ]
     return True, "".join(parts)
+
+
+def placeholders_to_template(text: str, format_spec: str) -> tuple[Template, list[str]]:
+    """
+    Replace placeholders in text with interpolations to make template.
+
+    Return the template and a list of placeholders in the order they were found.
+    """
+    found = []
+    parts = []
+    for match_info in _find_all_placeholders(text):
+        match_str = text[match_info.start : match_info.end]
+        if match_info.index is not None:
+            found.append(match_str)
+            parts.append(Interpolation(match_info.index, "", None, format_spec))
+        else:
+            parts.append(match_str)
+    return Template(*parts), found
+
+
+def reduce_template(template: Template) -> str | Interpolation | Template:
+    """
+    Reduce a template to simpler parts if possible.
+    """
+    parts = list(template)
+    if len(parts) == 1:
+        if isinstance(parts[0], str):
+            return template.strings[0]
+        else:
+            return template.interpolations[0]
+    else:
+        return template
