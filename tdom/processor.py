@@ -1,10 +1,5 @@
-<<<<<<< HEAD
 from enum import Enum, auto
-import random
-import re
 import string
-=======
->>>>>>> 4cd5039 (Split out placeholders and formatting.)
 import sys
 import typing as t
 from collections.abc import Iterable
