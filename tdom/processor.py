@@ -1,5 +1,4 @@
 from enum import Enum, auto
-import string
 import sys
 import typing as t
 from collections.abc import Iterable
@@ -139,7 +138,7 @@ def _process_data_attr(value: object) -> t.Iterable[tuple[str, str | None]]:
 def _process_class_attr(value: object) -> t.Iterable[tuple[str, str | None]]:
     """Substitute a class attribute based on the interpolated value."""
     if value is None:
-        yield f"class", None
+        yield "class", None
     elif value is False:
         # Explicitly ignore this value for "class" to support
         # short-circuiting, ie. t"<div class={active and "active"} />"
