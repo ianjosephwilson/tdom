@@ -33,6 +33,8 @@ def escape_html_comment(text):
     GT = '&gt;'
     LT = '&lt;'
 
+    if not text:
+        return text
     # - text must not start with the string ">"
     if text[0] == '>':
         text = GT + text[1:]

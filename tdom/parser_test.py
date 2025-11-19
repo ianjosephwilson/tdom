@@ -261,13 +261,10 @@ def test_nested_self_closing_tags():
 
 
 def test_parse_html_iter_preserves_chunks():
-    # We aggregate content for script/style tags so we can escape it
-    # and then just do it for everything else.  So this does not work.
-    # Do we need this to work for clientside applications ?
     chunks = [
         "<div>",
-        "Hello ",
-        "there, ",
+        "Hello ", # (1)
+        "there, ", # (2): (1) and (2) are merged, not sure the purpose of this test.
         "<span>world</span>",
         "!</div>",
     ]
@@ -308,7 +305,7 @@ def test_parse_attrs_mixed():
         th.attr_t("href", "/", 0),
         th.attr("attributionsrc", 1),
         th.attr_spread(2),
-   ), children=[th.text("Check this out! ", 3)])
+    ), children=[th.text("Check this out! ", 3)])
 
 
 def test_parse_component_basic():

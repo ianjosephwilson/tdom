@@ -36,14 +36,16 @@ class NodeParser(HTMLParser):
     template: Template
     template_string_index: int
     feeding_template_string: bool
+    merge_data_text: bool
 
-    def __init__(self, *, convert_charrefs=True):
+    def __init__(self, *, convert_charrefs=True, merge_data_text=True):
         self.root = TFragment(children=[])
         self.stack = []
         self.interpolations = {}
         self.active_placeholders = {}
         self.template_string_index = -1
         self.feeding_template_string = False
+        self.merge_data_text = merge_data_text
         super().__init__(convert_charrefs=convert_charrefs)
 
     def handle_attrs(self, attrs_seq:  t.Sequence[ParsedAttr]) -> tuple[TNodeAttr,...]:
@@ -138,6 +140,7 @@ class NodeParser(HTMLParser):
         tag_t = list(self.extract_template(tag, ''))
         match tag_t:
             case [Interpolation(value=endtag_ip_index)]:
+                # Close a component.
                 if not self.stack:
                     raise ValueError(f"Unexpected closing component </{self.get_comp_endtag(endtag_ip_index)}> with no open element.")
                 else:
@@ -154,12 +157,16 @@ class NodeParser(HTMLParser):
                             element.component_info.endtag_interpolation_index = endtag_ip_index
                             element.component_info.strings_slice_end = self.get_template_part_index()[0]
                             self.append_element_child(element)
-            case [str()]: # NONCOMPONENT ENDTAG
+            case [str()]:
+                # Close a regular tag.
                 if not self.stack:
                     raise ValueError(f"Unexpected closing tag </{tag}> with no open element.")
                 else:
                     element = self.stack.pop()
-                    if element.tag != tag:
+                    if element.component_info is not None:
+                        starttag_ip_index = element.component_info.starttag_interpolation_index
+                        raise ValueError(f"Mismatched closing tag </{tag}> for <{self.get_comp_starttag(starttag_ip_index)}>.")
+                    elif element.tag != tag:
                         raise ValueError(f"Mismatched closing tag </{tag}> for <{element.tag}>.")
                     self.append_element_child(element)
             case _:
@@ -174,11 +181,13 @@ class NodeParser(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         text_t = self.extract_template(data)
-        # Join the last template if it exists or start a new one.
-        last_text_child = self.get_latest_text_child()
-        if last_text_child:
-            last_text_child.text_t += text_t
-            return
+
+        if self.merge_data_text:
+            # Join the last template if it exists or start a new one.
+            last_text_child = self.get_latest_text_child()
+            if last_text_child:
+                last_text_child.text_t += text_t
+                return
 
         text = TText(text_t)
         self.append_child(text)

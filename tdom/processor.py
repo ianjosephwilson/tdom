@@ -172,7 +172,7 @@ def _substitute_interpolated_attrs(
                 for sub_k, sub_v in _process_dynamic_attr(key, new_value):
                     new_attrs[sub_k] = sub_v
             case str(), Template():
-                new_attrs[key] = ''.join(part if isinstance(part, str) else format_interpolation(interpolations[part.value]) for part in value)
+                new_attrs[key] = "".join(part if isinstance(part, str) else str(format_interpolation(interpolations[part.value])) for part in value)
             case None, int():
                 interpolation = interpolations[value]
                 spread_value = format_interpolation(interpolation)
@@ -237,6 +237,8 @@ def _node_from_value(value: object) -> Node:
             return value
         case Template():
             return html(value).node
+        case HTMLProcessor():
+            return value.get_node()
         # Consider: falsey values, not just False and None?
         case False | None:
             return Fragment(children=[])
@@ -341,9 +343,17 @@ def _substitute_node(tnode: TNode, interpolations: tuple[Interpolation, ...]) ->
              if isinstance(reduce_template(text_t), str):
                  return Text(text_t.strings[0])
              else:
-                 # TODO: A lot of uninvited Fragments in here.
-                 f = Fragment(children=[Text(part) if isinstance(part, str) else _node_from_value(format_interpolation(interpolations[part.value])) for part in text_t if not isinstance(part, str) or part])
-                 f.children = sum([[child] if not isinstance(child, Fragment) else child.children for child in f.children], [])
+                 f = Fragment(children=[])
+                 for part in text_t:
+                     if isinstance(part, str):
+                         f.children.append(Text(part))
+                     else:
+                         res = _node_from_value(format_interpolation(interpolations[part.value]))
+                         if isinstance(res, Fragment):
+                             if res.children:
+                                 f.children.extend(res.children)
+                         else:
+                             f.children.append(res)
                  return f
         case TElement(tag=tag, attrs=attrs, children=children, component_info=component_info):
             new_children = _substitute_and_flatten_children(children, interpolations)
@@ -373,12 +383,17 @@ class HTMLProcessor:
     def __str__(self):
         return str(self.node)
 
+    def get_node(self):
+        if isinstance(self.node, Fragment) and len(self.node.children) == 1:
+            return self.node.children[0]
+        return self.node
+
     def __eq__(self, other: object):
         match other:
             case Node():
-                return self.node == other
+                return self.get_node() == other
             case HTMLProcessor():
-                return self.node == other.node
+                return self.get_node() == other.get_node()
             case _:
                 raise NotImplementedError('We can only be compared against another Node() or HTMLProcessor().')
 

@@ -953,7 +953,7 @@ def test_component_returning_iterable():
         yield html(t"<li>Item {3}</li>")
 
     node = html(t"<ul><{Items} /></ul>")
-    exp = Element(
+    assert node == Element(
         "ul",
         children=[
             Element("li", children=[Text("Item "), Text("1")]),
@@ -961,10 +961,6 @@ def test_component_returning_iterable():
             Element("li", children=[Text("Item "), Text("3")]),
         ],
     )
-    from pprint import pprint
-    pprint(node.node)
-    pprint (exp)
-    assert node == exp
     assert str(node) == "<ul><li>Item 1</li><li>Item 2</li><li>Item 3</li></ul>"
 
 
@@ -1005,7 +1001,7 @@ class ClassComponent:
         )
 
 
-def test_class_component_implicit_invocation():
+def test_class_component_implicit_invocation_with_children():
     node = html(
         t"<{ClassComponent} user-name='Alice' image-url='https://example.com/alice.png'>Fun times!</{ClassComponent}>"
     )
