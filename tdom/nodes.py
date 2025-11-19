@@ -4,7 +4,7 @@ from string.templatelib import Template
 import typing as t
 
 from markupsafe import escape
-from .placeholders import reduce_template
+
 from .formatting import escape_html_comment, escape_html_script, escape_html_style
 
 

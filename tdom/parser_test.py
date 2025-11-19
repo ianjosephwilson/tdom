@@ -1,5 +1,4 @@
 import pytest
-from markupsafe import Markup
 from string.templatelib import Template, Interpolation
 
 from .nodes import TComment, DocumentType, TElement, TFragment, TText, AttrMarker, ComponentInfo

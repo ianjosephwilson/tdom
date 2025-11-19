@@ -6,7 +6,7 @@ from string.templatelib import Interpolation, Template
 import pytest
 from markupsafe import Markup
 
-from .nodes import Element, Fragment, Node, Text, Comment
+from .nodes import Element, Fragment, Node, Text, Comment, DocumentType
 from .placeholders import _PLACEHOLDER_PREFIX, _PLACEHOLDER_SUFFIX
 from .processor import html
 
@@ -27,6 +27,15 @@ def test_parse_text():
     assert node == Text("Hello, world!")
     assert str(node) == "Hello, world!"
 
+def test_parse_comment():
+    node = html(t"<!--This is a comment-->")
+    assert node == Comment('This is a comment')
+    assert str(node) == "<!--This is a comment-->"
+
+def test_parse_document_type():
+    node = html(t"<!doctype html>")
+    assert node == DocumentType('html')
+    assert str(node) == "<!DOCTYPE html>"
 
 def test_parse_void_element():
     node = html(t"<br>")

@@ -120,7 +120,7 @@ class NodeParser(HTMLParser):
 
         self.append_element_child(element)
 
-    def is_void_element(self, element: Element):
+    def is_void_element(self, element: TElement):
         return element.component_info is None and element.tag in VOID_ELEMENTS
 
     def get_ip_expression(self, ip_index: int, fallback_prefix: str = 'interpolation-at-') -> str:
@@ -279,7 +279,7 @@ class NodeParser(HTMLParser):
         text_t, found = placeholders_to_template(text, format_spec)
         for placeholder in found:
             if placeholder not in self.active_placeholders:
-                raise ValueError(f'Found unexpected placeholder {placeholder} for interpolation {desconstruct_placeholder(placeholder)}.')
+                raise ValueError(f'Found unexpected placeholder {placeholder} for interpolation {deconstruct_placeholder(placeholder)}.')
             else:
                 del self.active_placeholders[placeholder]
         return text_t

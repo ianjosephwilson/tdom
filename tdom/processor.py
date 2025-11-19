@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from enum import Enum, auto
 import sys
 import typing as t
 from collections.abc import Iterable
@@ -9,11 +8,10 @@ from string.templatelib import Interpolation, Template
 
 from markupsafe import Markup
 
-from .callables import CallableInfo, get_callable_info
+from .callables import get_callable_info
 from .classnames import classnames
-from .nodes import Element, Fragment, Node, Text, TElement, TFragment, TNode, TText, TComment, Comment, AttrMarker, NodeAttrs, TNodeAttr
+from .nodes import TNode, TElement, TFragment, TText, TComment, Node, Element, Fragment, Text, Comment, AttrMarker, NodeAttrs, TNodeAttr
 from .parser import parse_html
-from .placeholders import _find_placeholder, _placeholder, _replace_placeholders, reduce_template
 from .formatting import format_interpolation
 
 
@@ -339,12 +337,21 @@ def _invoke_component(
 def _substitute_node(tnode: TNode, interpolations: tuple[Interpolation, ...]) -> Node:
     """Substitute placeholders in a node based on the corresponding interpolations."""
     match tnode:
+        case TComment(text_t):
+            chunks = []
+            for part in text_t:
+                if isinstance(part, str):
+                    chunks.append(part)
+                else:
+                    chunks.append(str(format_interpolation(interpolations[part.value])))
+            return Comment("".join(chunks))
         case TText(text_t):
-             if isinstance(reduce_template(text_t), str):
-                 return Text(text_t.strings[0])
+             parts = list(text_t)
+             if not parts or len(parts) == 1 and isinstance(parts[0], str):
+                 return Text(parts[0])
              else:
                  f = Fragment(children=[])
-                 for part in text_t:
+                 for part in parts:
                      if isinstance(part, str):
                          f.children.append(Text(part))
                      else:
@@ -354,6 +361,8 @@ def _substitute_node(tnode: TNode, interpolations: tuple[Interpolation, ...]) ->
                                  f.children.extend(res.children)
                          else:
                              f.children.append(res)
+                 if len(f.children) == 1:
+                     return f.children[0]
                  return f
         case TElement(tag=tag, attrs=attrs, children=children, component_info=component_info):
             new_children = _substitute_and_flatten_children(children, interpolations)
