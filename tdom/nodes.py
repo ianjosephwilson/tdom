@@ -41,13 +41,16 @@ class AttrMarker(Enum):
     BARE_ATTR = auto()
 
 
-TNodeAttr: t.TypeAlias = tuple[str,str|t.Literal[AttrMarker.BARE_ATTR]|int|Template]|tuple[None,int]
+TNodeAttr: t.TypeAlias = (
+    tuple[str, str | t.Literal[AttrMarker.BARE_ATTR] | int | Template]
+    | tuple[None, int]
+)
 
 
-ParsedAttr: t.TypeAlias = tuple[str, str|None]
+ParsedAttr: t.TypeAlias = tuple[str, str | None]
 
 
-NodeAttrs: t.TypeAlias = dict[str, str|None]
+NodeAttrs: t.TypeAlias = dict[str, str | None]
 
 
 def to_template_repr(template):
@@ -65,13 +68,16 @@ def to_template_repr(template):
     return tuple(parts)
 
 
-def to_node_attrs_repr(attrs_seq: tuple[TNodeAttr,...]) -> list:
+def to_node_attrs_repr(attrs_seq: tuple[TNodeAttr, ...]) -> list:
     """
     Convert a node attribute sequence into a comparable representation.
 
     This is mostly for testing because Templates/Interpolations are not comparable.
     """
-    return [(k, repr(v)) if not isinstance(v, (AttrMarker, int, str)) else (k, v) for k, v in attrs_seq]
+    return [
+        (k, repr(v)) if not isinstance(v, (AttrMarker, int, str)) else (k, v)
+        for k, v in attrs_seq
+    ]
 
 
 @dataclass
@@ -84,7 +90,6 @@ class ComponentInfo:
 
 @dataclass
 class TNode:
-
     def __str__(self) -> str:
         raise NotImplementedError("Cannot serialize dynamic nodes.")
 
@@ -95,19 +100,27 @@ class TNode:
 @dataclass
 class TElement(TNode):
     tag: str
-    attrs: tuple[TNodeAttr,...]
+    attrs: tuple[TNodeAttr, ...]
     children: list = field(default_factory=list)
-    component_info: ComponentInfo|None = None
+    component_info: ComponentInfo | None = None
 
     def to_comparable(self) -> tuple:
         """
         Generate a tuple of our state to compare to another Element.
 
         """
-        return (self.tag, to_node_attrs_repr(self.attrs), self.children, self.component_info)
+        return (
+            self.tag,
+            to_node_attrs_repr(self.attrs),
+            self.children,
+            self.component_info,
+        )
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, TElement) and self.to_comparable() == other.to_comparable()
+        return (
+            isinstance(other, TElement)
+            and self.to_comparable() == other.to_comparable()
+        )
 
 
 @dataclass
@@ -118,22 +131,27 @@ class TFragment(TNode):
 @dataclass
 class TText:
     text_t: Template
+
     def __eq__(self, other: object) -> bool:
         # This is primarily of use for testing purposes. We only consider
         # two Text nodes equal if their string representations match.
-        return isinstance(other, TText) and to_template_repr(self.text_t) == to_template_repr(other.text_t)
+        return isinstance(other, TText) and to_template_repr(
+            self.text_t
+        ) == to_template_repr(other.text_t)
+
 
 @dataclass
 class TComment:
     text_t: Template
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, TComment) and to_template_repr(self.text_t) == to_template_repr(other.text_t)
+        return isinstance(other, TComment) and to_template_repr(
+            self.text_t
+        ) == to_template_repr(other.text_t)
 
 
 @dataclass(slots=True)
 class Node(TNode):
-
     def __html__(self) -> str:
         """Return the HTML representation of the node."""
         # By default, just return the string representation
@@ -212,20 +230,22 @@ class Element(Node):
             return f"<{self.tag}{attrs_str} />"
         if not self.children:
             return f"<{self.tag}{attrs_str}></{self.tag}>"
-        if self.tag in ('script', 'style'):
+        if self.tag in ("script", "style"):
             chunks = []
             for child in self.children:
                 if isinstance(child, Text):
                     chunks.append(child.text)
                 else:
-                    raise ValueError('Cannot serialize non-text content inside a script tag.')
+                    raise ValueError(
+                        "Cannot serialize non-text content inside a script tag."
+                    )
             children_str = "".join(chunks)
-            if self.tag == 'script':
+            if self.tag == "script":
                 children_str = escape_html_script(children_str)
-            elif self.tag == 'style':
+            elif self.tag == "style":
                 children_str = escape_html_style(children_str)
             else:
-                raise ValueError('Unsupported tag for single-level bulk escaping.')
+                raise ValueError("Unsupported tag for single-level bulk escaping.")
         else:
             children_str = "".join(str(child) for child in self.children)
         return f"<{self.tag}{attrs_str}>{children_str}</{self.tag}>"

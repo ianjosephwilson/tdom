@@ -27,15 +27,18 @@ def test_parse_text():
     assert node == Text("Hello, world!")
     assert str(node) == "Hello, world!"
 
+
 def test_parse_comment():
     node = html(t"<!--This is a comment-->")
-    assert node == Comment('This is a comment')
+    assert node == Comment("This is a comment")
     assert str(node) == "<!--This is a comment-->"
+
 
 def test_parse_document_type():
     node = html(t"<!doctype html>")
-    assert node == DocumentType('html')
+    assert node == DocumentType("html")
     assert str(node) == "<!DOCTYPE html>"
+
 
 def test_parse_void_element():
     node = html(t"<br>")
@@ -162,7 +165,7 @@ def test_interpolated_in_content_node():
             Text("</style><script>alert('whoops');</script><style>"),
         ],
     )
-    LT = '&lt;'
+    LT = "&lt;"
     assert (
         str(node)
         == f"<style>{LT}/style><script>alert('whoops');</script><style>{LT}/style><script>alert('whoops');</script><style></style>"
@@ -413,9 +416,7 @@ def test_interpolated_attribute_value():
     url = "https://example.com/"
     node = html(t'<a href="{url}">Link</a>')
     assert node == Element(
-        "a",
-        attrs={"href": "https://example.com/"},
-        children=[Text("Link")]
+        "a", attrs={"href": "https://example.com/"}, children=[Text("Link")]
     )
     assert str(node) == '<a href="https://example.com/">Link</a>'
 
@@ -445,9 +446,7 @@ def test_interpolated_attribute_value_true():
     disabled = True
     node = html(t"<button disabled={disabled}>Click me</button>")
     assert node == Element(
-        "button", attrs={
-            "disabled": None
-        }, children=[Text("Click me")]
+        "button", attrs={"disabled": None}, children=[Text("Click me")]
     )
     assert str(node) == "<button disabled>Click me</button>"
 
@@ -644,30 +643,31 @@ def test_data_attr_toggle_to_removed():
     for v in False, None:
         for node in [
             html(t"<div data-selected data={dict(selected=v)}></div>"),
-            html(t'<div data-selected="on" data={dict(selected=v)}></div>')]:
-            assert node == Element('div')
-            assert str(node) == '<div></div>'
+            html(t'<div data-selected="on" data={dict(selected=v)}></div>'),
+        ]:
+            assert node == Element("div")
+            assert str(node) == "<div></div>"
 
 
 def test_data_attr_toggle_to_str():
     for node in [
         html(t"<div data-selected data={dict(selected='yes')}></div>"),
         html(t'<div data-selected="no" data={dict(selected="yes")}></div>'),
-        ]:
-        assert node == Element('div', {"data-selected": "yes"})
+    ]:
+        assert node == Element("div", {"data-selected": "yes"})
         assert str(node) == '<div data-selected="yes"></div>'
 
 
 def test_data_attr_toggle_to_true():
     node = html(t'<div data-selected="yes" data={dict(selected=True)}></div>')
-    assert node == Element('div', {"data-selected": None})
-    assert str(node) == '<div data-selected></div>'
+    assert node == Element("div", {"data-selected": None})
+    assert str(node) == "<div data-selected></div>"
 
 
 def test_data_attr_unrelated_unaffected():
-    node = html(t'<div data-selected data={dict(active=True)}></div>')
-    assert node == Element('div', {"data-selected": None, "data-active": None})
-    assert str(node) == '<div data-selected data-active></div>'
+    node = html(t"<div data-selected data={dict(active=True)}></div>")
+    assert node == Element("div", {"data-selected": None, "data-active": None})
+    assert str(node) == "<div data-selected data-active></div>"
 
 
 def test_interpolated_data_attribute_multiple_placeholders():
@@ -711,20 +711,24 @@ def test_interpolated_style_attribute():
         == '<p style="color: red; font-weight: bold; font-size: 16px">Warning!</p>'
     )
 
+
 def test_clear_static_style():
     node = html(t'<p style="font-color: red" {dict(style=None)}></p>')
     assert node == Element("p")
     assert str(node) == "<p></p>"
+
 
 def test_override_static_style_str_str():
     node = html(t'<p style="font-color: red" {dict(style="font-size: 15px")}></p>')
     assert node == Element("p", {"style": "font-size: 15px"})
     assert str(node) == '<p style="font-size: 15px"></p>'
 
+
 def test_override_static_style_str_builder():
     node = html(t'<p style="font-color: red" {dict(style={"font-size": "15px"})}></p>')
     assert node == Element("p", {"style": "font-size: 15px"})
     assert str(node) == '<p style="font-size: 15px"></p>'
+
 
 def test_interpolated_style_attribute_multiple_placeholders():
     styles1 = {"color": "red"}
@@ -1175,31 +1179,35 @@ def test_component_requiring_positional_arg_fails():
 
 def test_replace_static_attr_str_str():
     node = html(t'<div title="default" {dict(title="fresh")}></div>')
-    assert node == Element('div', {'title': 'fresh'})
+    assert node == Element("div", {"title": "fresh"})
     assert str(node) == '<div title="fresh"></div>'
+
 
 def test_replace_static_attr_str_true():
     node = html(t'<div title="default" {dict(title=True)}></div>')
-    assert node == Element('div', {'title': None})
-    assert str(node) == '<div title></div>'
+    assert node == Element("div", {"title": None})
+    assert str(node) == "<div title></div>"
+
 
 def test_replace_static_attr_true_str():
-    node = html(t'<div title {dict(title="fresh")}></div>')
-    assert node == Element('div', {'title': "fresh"})
+    node = html(t"<div title {dict(title='fresh')}></div>")
+    assert node == Element("div", {"title": "fresh"})
     assert str(node) == '<div title="fresh"></div>'
+
 
 def test_remove_static_attr_str_none():
     node = html(t'<div title="default" {dict(title=None)}></div>')
-    assert node == Element('div')
-    assert str(node) == '<div></div>'
+    assert node == Element("div")
+    assert str(node) == "<div></div>"
+
 
 def test_remove_static_attr_true_none():
-    node = html(t'<div title {dict(title=None)}></div>')
-    assert node == Element('div')
-    assert str(node) == '<div></div>'
+    node = html(t"<div title {dict(title=None)}></div>")
+    assert node == Element("div")
+    assert str(node) == "<div></div>"
 
 
 def test_other_static_attr_intact():
     node = html(t'<img title="default" {dict(alt="fresh")}>')
-    assert node == Element('img', {'title': 'default', 'alt': 'fresh'})
+    assert node == Element("img", {"title": "default", "alt": "fresh"})
     assert str(node) == '<img title="default" alt="fresh" />'

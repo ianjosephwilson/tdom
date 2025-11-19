@@ -1,18 +1,36 @@
 import pytest
 from string.templatelib import Template, Interpolation
 
-from .nodes import TComment, DocumentType, TElement, TFragment, TText, AttrMarker, ComponentInfo
+from .nodes import (
+    TComment,
+    DocumentType,
+    TElement,
+    TFragment,
+    TText,
+    AttrMarker,
+    ComponentInfo,
+)
 from .parser import parse_html
 
-class TestHelpers:
-    def to_template(self, *parts, format_spec=''):
-        """ Shorthand to convert str() to strings and int() to interpolations and then unpack into Template() to square it up. """
-        return Template(*([part if isinstance(part, str) else Interpolation(part, '', None, format_spec) for part in parts]))
 
-    def text(self, *parts, format_spec=''):
+class TestHelpers:
+    def to_template(self, *parts, format_spec=""):
+        """Shorthand to convert str() to strings and int() to interpolations and then unpack into Template() to square it up."""
+        return Template(
+            *(
+                [
+                    part
+                    if isinstance(part, str)
+                    else Interpolation(part, "", None, format_spec)
+                    for part in parts
+                ]
+            )
+        )
+
+    def text(self, *parts, format_spec=""):
         return TText(self.to_template(*parts, format_spec=format_spec))
 
-    def comment(self, *parts, format_spec=''):
+    def comment(self, *parts, format_spec=""):
         return TComment(self.to_template(*parts, format_spec=format_spec))
 
     def el(self, tag, attrs=(), children=[], component_info=None):
@@ -21,7 +39,7 @@ class TestHelpers:
     def attr(self, k: str, values_index: int):
         return (k, values_index)
 
-    def attr_t(self, k: str, *template_parts: list[str|int]):
+    def attr_t(self, k: str, *template_parts: list[str | int]):
         return (k, self.to_template(*template_parts))
 
     def attr_spread(self, values_index: int):
@@ -32,6 +50,7 @@ class TestHelpers:
 
 
 th = TestHelpers()
+
 
 def test_parse_empty():
     node = parse_html("")
@@ -189,7 +208,7 @@ def test_parse_entities_are_unescaped():
         "p",
         children=[th.text("</p>")],
     )
-    #@TODO: Confirm tests exist for entity escaping.
+    # @TODO: Confirm tests exist for entity escaping.
 
 
 def test_parse_script_tag_content():
@@ -262,8 +281,8 @@ def test_nested_self_closing_tags():
 def test_parse_html_iter_preserves_chunks():
     chunks = [
         "<div>",
-        "Hello ", # (1)
-        "there, ", # (2): (1) and (2) are merged, not sure the purpose of this test.
+        "Hello ",  # (1)
+        "there, ",  # (2): (1) and (2) are merged, not sure the purpose of this test.
         "<span>world</span>",
         "!</div>",
     ]
@@ -278,62 +297,97 @@ def test_parse_html_iter_preserves_chunks():
         ],
     )
 
+
 def test_parse_dynamic_attr():
     src = "example"
-    node = parse_html(t'<a href={src}></a>')
-    assert node == th.el('a', attrs=(th.attr('href', 0),))
+    node = parse_html(t"<a href={src}></a>")
+    assert node == th.el("a", attrs=(th.attr("href", 0),))
+
 
 def test_parse_dynamic_attr_spread():
-    attrs=dict(src="example")
-    node = parse_html(t'<a {attrs}></a>')
-    assert node == th.el('a', attrs=(th.attr_spread(0),))
+    attrs = dict(src="example")
+    node = parse_html(t"<a {attrs}></a>")
+    assert node == th.el("a", attrs=(th.attr_spread(0),))
+
 
 def test_parse_dynamic_attr_template():
     src = "example"
     node = parse_html(t'<a href="/{src}"></a>')
-    assert node == th.el('a', attrs=(th.attr_t("href", "/", 0),))
+    assert node == th.el("a", attrs=(th.attr_t("href", "/", 0),))
 
 
 def test_parse_attrs_mixed():
     src = "example"
-    attrs = {'target': '_blank'}
+    attrs = {"target": "_blank"}
     blurb = "This example is great!"
-    node = parse_html(t'<a title="A great example." href="/{src}" attributionsrc={True} {attrs}>Check this out! {blurb}</a>')
-    assert node == th.el('a', attrs=(
-        ("title", "A great example."),
-        th.attr_t("href", "/", 0),
-        th.attr("attributionsrc", 1),
-        th.attr_spread(2),
-    ), children=[th.text("Check this out! ", 3)])
+    node = parse_html(
+        t'<a title="A great example." href="/{src}" attributionsrc={True} {attrs}>Check this out! {blurb}</a>'
+    )
+    assert node == th.el(
+        "a",
+        attrs=(
+            ("title", "A great example."),
+            th.attr_t("href", "/", 0),
+            th.attr("attributionsrc", 1),
+            th.attr_spread(2),
+        ),
+        children=[th.text("Check this out! ", 3)],
+    )
 
 
 def test_parse_component_basic():
     def DivWrapper(attrs, embedded_t):
-        return t'<div>{embedded_t}</div>'
-    node = parse_html(t'<body><{DivWrapper}></{DivWrapper}></body>')
-    assert node == th.el('body', children=[th.el('component-at-0', component_info=ComponentInfo(0, 1, strings_slice_begin=1, strings_slice_end=2))])
+        return t"<div>{embedded_t}</div>"
+
+    node = parse_html(t"<body><{DivWrapper}></{DivWrapper}></body>")
+    assert node == th.el(
+        "body",
+        children=[
+            th.el(
+                "component-at-0",
+                component_info=ComponentInfo(
+                    0, 1, strings_slice_begin=1, strings_slice_end=2
+                ),
+            )
+        ],
+    )
 
 
 def test_parse_component_xhtml_close():
     def DivWrapper(attrs, embedded_t):
-        return t'<div>{embedded_t}</div>'
-    node = parse_html(t'<body><{DivWrapper} /></body>')
-    assert node == th.el('body', children=[th.el('component-at-0', component_info=ComponentInfo(0, 0))])
+        return t"<div>{embedded_t}</div>"
+
+    node = parse_html(t"<body><{DivWrapper} /></body>")
+    assert node == th.el(
+        "body", children=[th.el("component-at-0", component_info=ComponentInfo(0, 0))]
+    )
 
 
 def test_parse_component_attrs():
     def DivWrapper(attrs, embedded_t):
-        wrap_t = t'<div style={attrs.get("style", None) or None}>{embedded_t}</div>'
-        if attrs.get('doubletime'):
-            wrap_t = t'<div>{wrap_t}</div>'
+        wrap_t = t"<div style={attrs.get('style', None) or None}>{embedded_t}</div>"
+        if attrs.get("doubletime"):
+            wrap_t = t"<div>{wrap_t}</div>"
         return wrap_t
+
     title = "Wrap it up"
-    config = {'doubletime': True}
-    node = parse_html(t'<body><{DivWrapper} style="background-color: red" title={title} {config}></{DivWrapper}></body>')
-    assert node == th.el('body', children=[
-        th.el('component-at-0', attrs=(
-            ("style", "background-color: red"),
-            th.attr("title", 1),
-            th.attr_spread(2),
-        ), component_info=ComponentInfo(0, 3, strings_slice_begin=3, strings_slice_end=4)),
-    ])
+    config = {"doubletime": True}
+    node = parse_html(
+        t'<body><{DivWrapper} style="background-color: red" title={title} {config}></{DivWrapper}></body>'
+    )
+    assert node == th.el(
+        "body",
+        children=[
+            th.el(
+                "component-at-0",
+                attrs=(
+                    ("style", "background-color: red"),
+                    th.attr("title", 1),
+                    th.attr_spread(2),
+                ),
+                component_info=ComponentInfo(
+                    0, 3, strings_slice_begin=3, strings_slice_end=4
+                ),
+            ),
+        ],
+    )

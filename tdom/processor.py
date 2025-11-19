@@ -10,7 +10,21 @@ from markupsafe import Markup
 
 from .callables import get_callable_info
 from .classnames import classnames
-from .nodes import TNode, TElement, TFragment, TText, TComment, Node, Element, Fragment, Text, Comment, AttrMarker, NodeAttrs, TNodeAttr
+from .nodes import (
+    TNode,
+    TElement,
+    TFragment,
+    TText,
+    TComment,
+    Node,
+    Element,
+    Fragment,
+    Text,
+    Comment,
+    AttrMarker,
+    NodeAttrs,
+    TNodeAttr,
+)
 from .parser import parse_html
 from .formatting import format_interpolation
 
@@ -77,7 +91,9 @@ def _process_style_attr(value: object) -> t.Iterable[tuple[str, str | None]]:
         style_str = "; ".join(f"{k}: {v}" for k, v in d.items())
         yield ("style", style_str)
     except TypeError:
-        raise TypeError("'style' attribute value must be a None, string or dict") from None
+        raise TypeError(
+            "'style' attribute value must be a None, string or dict"
+        ) from None
 
 
 def _substitute_spread_attrs(
@@ -131,8 +147,8 @@ def _process_dynamic_attr(
 
 
 def _process_static_attr_value(
-    value: str|None,
-) -> str|AttrMarker:
+    value: str | None,
+) -> str | AttrMarker:
     """
     Process statically parsed attributes before they are merged in.
     """
@@ -140,18 +156,20 @@ def _process_static_attr_value(
 
 
 class LastUpdatedOrderedDict(OrderedDict):
-    'Store items in the order the keys were last added'
+    "Store items in the order the keys were last added"
 
     def __setitem__(self, key, value):
         super().__setitem__(key, value)
         self.move_to_end(key)
 
 
-ResolvedNodeAttrs: t.TypeAlias = dict[str, object|None|t.Literal[AttrMarker.BARE_ATTR]]
+ResolvedNodeAttrs: t.TypeAlias = dict[
+    str, object | None | t.Literal[AttrMarker.BARE_ATTR]
+]
 
 
 def _substitute_interpolated_attrs(
-    attrs_seq: tuple[TNodeAttr,...], interpolations: tuple[Interpolation, ...]
+    attrs_seq: tuple[TNodeAttr, ...], interpolations: tuple[Interpolation, ...]
 ) -> ResolvedNodeAttrs:
     """
     Replace placeholder values in attributes with their interpolated values.
@@ -163,21 +181,26 @@ def _substitute_interpolated_attrs(
 
     for key, value in attrs_seq:
         match key, value:
-            case str(), str()|AttrMarker.BARE_ATTR:
+            case str(), str() | AttrMarker.BARE_ATTR:
                 new_attrs[key] = value
             case str(), int():
                 new_value = format_interpolation(interpolations[value])
                 for sub_k, sub_v in _process_dynamic_attr(key, new_value):
                     new_attrs[sub_k] = sub_v
             case str(), Template():
-                new_attrs[key] = "".join(part if isinstance(part, str) else str(format_interpolation(interpolations[part.value])) for part in value)
+                new_attrs[key] = "".join(
+                    part
+                    if isinstance(part, str)
+                    else str(format_interpolation(interpolations[part.value]))
+                    for part in value
+                )
             case None, int():
                 interpolation = interpolations[value]
                 spread_value = format_interpolation(interpolation)
                 for sub_k, sub_v in _substitute_spread_attrs(spread_value):
                     new_attrs[sub_k] = sub_v
             case _:
-                raise ValueError(f'Unknown key/value format {key}: {value}')
+                raise ValueError(f"Unknown key/value format {key}: {value}")
     return new_attrs
 
 
@@ -186,7 +209,7 @@ def _process_html_attrs(attrs: ResolvedNodeAttrs) -> NodeAttrs:
     for key, value in attrs.items():
         if value in (True, AttrMarker.BARE_ATTR):
             processed_attrs[key] = None
-        elif value in (False, None): # Explicitly omit these attributes.
+        elif value in (False, None):  # Explicitly omit these attributes.
             continue
         else:
             processed_attrs[key] = str(value)
@@ -194,7 +217,7 @@ def _process_html_attrs(attrs: ResolvedNodeAttrs) -> NodeAttrs:
 
 
 def _substitute_attrs(
-    attrs_seq: tuple[TNodeAttr,...], interpolations: tuple[Interpolation, ...]
+    attrs_seq: tuple[TNodeAttr, ...], interpolations: tuple[Interpolation, ...]
 ) -> NodeAttrs:
     """
     Substitute placeholders in attributes for HTML elements.
@@ -346,30 +369,36 @@ def _substitute_node(tnode: TNode, interpolations: tuple[Interpolation, ...]) ->
                     chunks.append(str(format_interpolation(interpolations[part.value])))
             return Comment("".join(chunks))
         case TText(text_t):
-             parts = list(text_t)
-             if not parts or len(parts) == 1 and isinstance(parts[0], str):
-                 return Text(parts[0])
-             else:
-                 f = Fragment(children=[])
-                 for part in parts:
-                     if isinstance(part, str):
-                         f.children.append(Text(part))
-                     else:
-                         res = _node_from_value(format_interpolation(interpolations[part.value]))
-                         if isinstance(res, Fragment):
-                             if res.children:
-                                 f.children.extend(res.children)
-                         else:
-                             f.children.append(res)
-                 if len(f.children) == 1:
-                     return f.children[0]
-                 return f
-        case TElement(tag=tag, attrs=attrs, children=children, component_info=component_info):
+            parts = list(text_t)
+            if not parts or len(parts) == 1 and isinstance(parts[0], str):
+                return Text(parts[0])
+            else:
+                f = Fragment(children=[])
+                for part in parts:
+                    if isinstance(part, str):
+                        f.children.append(Text(part))
+                    else:
+                        res = _node_from_value(
+                            format_interpolation(interpolations[part.value])
+                        )
+                        if isinstance(res, Fragment):
+                            if res.children:
+                                f.children.extend(res.children)
+                        else:
+                            f.children.append(res)
+                if len(f.children) == 1:
+                    return f.children[0]
+                return f
+        case TElement(
+            tag=tag, attrs=attrs, children=children, component_info=component_info
+        ):
             new_children = _substitute_and_flatten_children(children, interpolations)
             if component_info is not None:
                 component_attrs = _substitute_interpolated_attrs(attrs, interpolations)
                 return _invoke_component(
-                    component_attrs, new_children, interpolations[component_info.starttag_interpolation_index]
+                    component_attrs,
+                    new_children,
+                    interpolations[component_info.starttag_interpolation_index],
                 )
             else:
                 html_attrs = _substitute_attrs(attrs, interpolations)
@@ -383,11 +412,11 @@ def _substitute_node(tnode: TNode, interpolations: tuple[Interpolation, ...]) ->
 
 @dataclass
 class HTMLProcessor:
-    """ SHIM to make html() work. """
+    """SHIM to make html() work."""
 
     node: Node
 
-    container_tag: str|None = None
+    container_tag: str | None = None
 
     def __str__(self):
         return str(self.node)
@@ -404,23 +433,31 @@ class HTMLProcessor:
             case HTMLProcessor():
                 return self.get_node() == other.get_node()
             case _:
-                raise NotImplementedError('We can only be compared against another Node() or HTMLProcessor().')
+                raise NotImplementedError(
+                    "We can only be compared against another Node() or HTMLProcessor()."
+                )
+
 
 @dataclass
 class CachedTemplate:
-    """ Attempt to cache template just by its strings. """
+    """Attempt to cache template just by its strings."""
+
     template: Template
 
     def __hash__(self):
         return hash(self.template.strings)
 
     def __eq__(self, other):
-        return isinstance(other, CachedTemplate) and self.template.strings == other.template.strings
+        return (
+            isinstance(other, CachedTemplate)
+            and self.template.strings == other.template.strings
+        )
 
 
 @lru_cache(maxsize=0 if "pytest" in sys.modules else 512)
 def _parse_html(cached_template):
     return parse_html(cached_template.template)
+
 
 # --------------------------------------------------------------------------
 # Public API
