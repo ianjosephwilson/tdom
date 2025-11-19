@@ -163,10 +163,10 @@ def test_interpolated_in_content_node():
 def test_interpolated_trusted_in_content_node():
     # https://github.com/t-strings/tdom/issues/68
     node = html(t"<script>if (a < b && c > d) {{ alert('wow'); }}</script>")
-    '''assert node == Element(
+    assert node == Element(
         "script",
-        children=[Text(Markup("if (a < b && c > d) { alert('wow'); }"))],
-    )'''
+        children=[Text("if (a < b && c > d) { alert('wow'); }")],
+    )
     assert str(node) == ("<script>if (a < b && c > d) { alert('wow'); }</script>")
 
 
