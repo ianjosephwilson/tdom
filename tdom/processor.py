@@ -1,7 +1,9 @@
+from dataclasses import dataclass
 from enum import Enum, auto
 import sys
 import typing as t
 from collections.abc import Iterable
+from collections import OrderedDict
 from functools import lru_cache
 from string.templatelib import Interpolation, Template
 
@@ -9,96 +11,15 @@ from markupsafe import Markup
 
 from .callables import CallableInfo, get_callable_info
 from .classnames import classnames
-from .nodes import Element, Fragment, Node, Text
+from .nodes import Element, Fragment, Node, Text, TElement, TFragment, TNode, TText, TComment, Comment, AttrMarker, NodeAttrs, TNodeAttr
 from .parser import parse_html
-from .placeholders import _find_placeholder, _placeholder, _replace_placeholders
+from .placeholders import _find_placeholder, _placeholder, _replace_placeholders, reduce_template
 from .formatting import format_interpolation
 
 
 @t.runtime_checkable
 class HasHTMLDunder(t.Protocol):
     def __html__(self) -> str: ...  # pragma: no cover
-
-
-# --------------------------------------------------------------------------
-# Instrumentation, Parsing, and Caching
-# --------------------------------------------------------------------------
-def _instrument(
-    strings: tuple[str, ...], callable_infos: tuple[CallableInfo | None, ...]
-) -> t.Iterable[str]:
-    """
-    Join the strings with placeholders in between where interpolations go.
-
-    This is used to prepare the template string for parsing, so that we can
-    later substitute the actual interpolated values into the parse tree.
-
-    The placeholders are chosen to be unlikely to collide with typical HTML
-    content.
-    """
-    count = len(strings)
-
-    callable_placeholders: dict[int, str] = {}
-
-    for i, s in enumerate(strings):
-        yield s
-        # There are always count-1 placeholders between count strings.
-        if i < count - 1:
-            placeholder = _placeholder(i)
-
-            # Special case for component callables: if the interpolation
-            # is a callable, we need to make sure that any matching closing
-            # tag uses the same placeholder.
-            callable_info = callable_infos[i]
-            if callable_info:
-                placeholder = callable_placeholders.setdefault(
-                    callable_info.id, placeholder
-                )
-
-            yield placeholder
-
-
-@lru_cache(maxsize=0 if "pytest" in sys.modules else 512)
-def _instrument_and_parse_internal(
-    strings: tuple[str, ...], callable_infos: tuple[CallableInfo | None, ...]
-) -> Node:
-    """
-    Instrument the strings and parse the resulting HTML.
-
-    The result is cached to avoid re-parsing the same template multiple times.
-    """
-    instrumented = _instrument(strings, callable_infos)
-    return parse_html(instrumented)
-
-
-def _callable_info(value: object) -> CallableInfo | None:
-    """Return a unique identifier for a callable, or None if not callable."""
-    return get_callable_info(value) if callable(value) else None
-
-
-def _instrument_and_parse(template: Template) -> Node:
-    """Instrument and parse a template, returning a tree of Nodes."""
-    # This is a thin wrapper around the cached internal function that does the
-    # actual work. This exists to handle the syntax we've settled on for
-    # component invocation, namely that callables are directly included as
-    # interpolations both in the open *and* the close tags. We need to make
-    # sure that matching tags... match!
-    #
-    # If we used `tdom`'s approach of component closing tags of <//> then we
-    # wouldn't have to do this. But I worry that tdom's syntax is harder to read
-    # (it's easy to miss the closing tag) and may prove unfamiliar for
-    # users coming from other templating systems.
-    callable_infos = tuple(
-        _callable_info(interpolation.value) for interpolation in template.interpolations
-    )
-    return _instrument_and_parse_internal(template.strings, callable_infos)
-
-
-# --------------------------------------------------------------------------
-# Placeholder Substitution
-# --------------------------------------------------------------------------
-class AttrMarker(Enum):
-    # Use this to mark attributes parsed in that are bare/boolean true.
-    BARE_ATTR_NONE = auto()
 
 
 def _force_dict(value: t.Any, *, kind: str) -> dict:
@@ -217,71 +138,77 @@ def _process_static_attr_value(
     """
     Process statically parsed attributes before they are merged in.
     """
-    return AttrMarker.BARE_ATTR_NONE if value is None else value
+    return AttrMarker.BARE_ATTR if value is None else value
+
+
+class LastUpdatedOrderedDict(OrderedDict):
+    'Store items in the order the keys were last added'
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self.move_to_end(key)
+
+
+ResolvedNodeAttrs: t.TypeAlias = dict[str, object|None|t.Literal[AttrMarker.BARE_ATTR]]
 
 
 def _substitute_interpolated_attrs(
-    attrs: dict[str, str | None], interpolations: tuple[Interpolation, ...]
-) -> dict[str, object | None]:
+    attrs_seq: tuple[TNodeAttr,...], interpolations: tuple[Interpolation, ...]
+) -> ResolvedNodeAttrs:
     """
     Replace placeholder values in attributes with their interpolated values.
 
     This only handles step (1): value substitution. No special processing
     of attribute names or value types is performed.
     """
-    new_attrs: dict[str, object | None] = {}
-    for key, value in attrs.items():
-        if value is not None:
-            has_placeholders, new_value = _replace_placeholders(value, interpolations)
-            if has_placeholders:
+    new_attrs: ResolvedNodeAttrs = LastUpdatedOrderedDict()
+
+    for key, value in attrs_seq:
+        match key, value:
+            case str(), str()|AttrMarker.BARE_ATTR:
+                new_attrs[key] = value
+            case str(), int():
+                new_value = format_interpolation(interpolations[value])
                 for sub_k, sub_v in _process_dynamic_attr(key, new_value):
                     new_attrs[sub_k] = sub_v
-                continue
-
-        if (index := _find_placeholder(key)) is not None:
-            # Spread attributes
-            interpolation = interpolations[index]
-            spread_value = format_interpolation(interpolation)
-            for sub_k, sub_v in _substitute_spread_attrs(spread_value):
-                new_attrs[sub_k] = sub_v
-        else:
-            # Static attribute
-            new_attrs[key] = _process_static_attr_value(value)
+            case str(), Template():
+                new_attrs[key] = ''.join(part if isinstance(part, str) else format_interpolation(interpolations[part.value]) for part in value)
+            case None, int():
+                interpolation = interpolations[value]
+                spread_value = format_interpolation(interpolation)
+                for sub_k, sub_v in _substitute_spread_attrs(spread_value):
+                    new_attrs[sub_k] = sub_v
+            case _:
+                raise ValueError(f'Unknown key/value format {key}: {value}')
     return new_attrs
 
 
-def _process_html_attrs(attrs: dict[str, object]) -> dict[str, str | None]:
-    """
-    Process attributes for HTML elements.
-
-    This handles steps (2) and (3): special attribute name handling and
-    value type processing (True -> None, False -> omit, etc.)
-    """
-    processed_attrs: dict[str, str | None] = {}
+def _process_html_attrs(attrs: ResolvedNodeAttrs) -> NodeAttrs:
+    processed_attrs: NodeAttrs = {}
     for key, value in attrs.items():
-        if value in (True, AttrMarker.BARE_ATTR_NONE):
+        if value in (True, AttrMarker.BARE_ATTR):
             processed_attrs[key] = None
         elif value in (False, None): # Explicitly omit these attributes.
             continue
         else:
-            processed_attrs[key] = value
+            processed_attrs[key] = str(value)
     return processed_attrs
 
 
 def _substitute_attrs(
-    attrs: dict[str, str | None], interpolations: tuple[Interpolation, ...]
-) -> dict[str, str | None]:
+    attrs_seq: tuple[TNodeAttr,...], interpolations: tuple[Interpolation, ...]
+) -> NodeAttrs:
     """
     Substitute placeholders in attributes for HTML elements.
 
     This is the full pipeline: interpolation + HTML processing.
     """
-    interpolated_attrs = _substitute_interpolated_attrs(attrs, interpolations)
+    interpolated_attrs = _substitute_interpolated_attrs(attrs_seq, interpolations)
     return _process_html_attrs(interpolated_attrs)
 
 
 def _substitute_and_flatten_children(
-    children: t.Iterable[Node], interpolations: tuple[Interpolation, ...]
+    children: t.Iterable[TNode], interpolations: tuple[Interpolation, ...]
 ) -> list[Node]:
     """Substitute placeholders in a list of children and flatten any fragments."""
     new_children: list[Node] = []
@@ -309,7 +236,7 @@ def _node_from_value(value: object) -> Node:
         case Node():
             return value
         case Template():
-            return html(value)
+            return html(value).node
         # Consider: falsey values, not just False and None?
         case False | None:
             return Fragment(children=[])
@@ -334,7 +261,7 @@ def _kebab_to_snake(name: str) -> str:
 
 
 def _invoke_component(
-    new_attrs: dict[str, object | None],
+    new_attrs: ResolvedNodeAttrs,
     new_children: list[Node],
     interpolation: Interpolation,
 ) -> Node:
@@ -384,7 +311,7 @@ def _invoke_component(
     for attr_name, attr_value in new_attrs.items():
         snake_name = _kebab_to_snake(attr_name)
         if snake_name in callable_info.named_params or callable_info.kwargs:
-            if attr_value is AttrMarker.BARE_ATTR_NONE:
+            if attr_value is AttrMarker.BARE_ATTR:
                 # Attributes parsed without a value will appear as boolean
                 # values to a component
                 # Ie. t'<input disabled>' implies ("disabled", True)
@@ -407,29 +334,69 @@ def _invoke_component(
     return _node_from_value(result)
 
 
-def _substitute_node(p_node: Node, interpolations: tuple[Interpolation, ...]) -> Node:
+def _substitute_node(tnode: TNode, interpolations: tuple[Interpolation, ...]) -> Node:
     """Substitute placeholders in a node based on the corresponding interpolations."""
-    match p_node:
-        case Text(text) if (index := _find_placeholder(text)) is not None:
-            interpolation = interpolations[index]
-            value = format_interpolation(interpolation)
-            return _node_from_value(value)
-        case Element(tag=tag, attrs=attrs, children=children):
+    match tnode:
+        case TText(text_t):
+             if isinstance(reduce_template(text_t), str):
+                 return Text(text_t.strings[0])
+             else:
+                 # TODO: A lot of uninvited Fragments in here.
+                 f = Fragment(children=[Text(part) if isinstance(part, str) else _node_from_value(format_interpolation(interpolations[part.value])) for part in text_t if not isinstance(part, str) or part])
+                 f.children = sum([[child] if not isinstance(child, Fragment) else child.children for child in f.children], [])
+                 return f
+        case TElement(tag=tag, attrs=attrs, children=children, component_info=component_info):
             new_children = _substitute_and_flatten_children(children, interpolations)
-            if (index := _find_placeholder(tag)) is not None:
+            if component_info is not None:
                 component_attrs = _substitute_interpolated_attrs(attrs, interpolations)
                 return _invoke_component(
-                    component_attrs, new_children, interpolations[index]
+                    component_attrs, new_children, interpolations[component_info.starttag_interpolation_index]
                 )
             else:
                 html_attrs = _substitute_attrs(attrs, interpolations)
                 return Element(tag=tag, attrs=html_attrs, children=new_children)
-        case Fragment(children=children):
+        case TFragment(children=children):
             new_children = _substitute_and_flatten_children(children, interpolations)
             return Fragment(children=new_children)
         case _:
-            return p_node
+            return tnode
 
+
+@dataclass
+class HTMLProcessor:
+    """ SHIM to make html() work. """
+
+    node: Node
+
+    container_tag: str|None = None
+
+    def __str__(self):
+        return str(self.node)
+
+    def __eq__(self, other: object):
+        match other:
+            case Node():
+                return self.node == other
+            case HTMLProcessor():
+                return self.node == other.node
+            case _:
+                raise NotImplementedError('We can only be compared against another Node() or HTMLProcessor().')
+
+@dataclass
+class CachedTemplate:
+    """ Attempt to cache template just by its strings. """
+    template: Template
+
+    def __hash__(self):
+        return hash(self.template.strings)
+
+    def __eq__(self, other):
+        return isinstance(other, CachedTemplate) and self.template.strings == other.template.strings
+
+
+@lru_cache(maxsize=0 if "pytest" in sys.modules else 512)
+def _parse_html(cached_template):
+    return parse_html(cached_template.template)
 
 # --------------------------------------------------------------------------
 # Public API
@@ -440,5 +407,6 @@ def html(template: Template) -> Node:
     """Parse a t-string and return a tree of Nodes."""
     # Parse the HTML, returning a tree of nodes with placeholders
     # where interpolations go.
-    p_node = _instrument_and_parse(template)
-    return _substitute_node(p_node, template.interpolations)
+    tnode = _parse_html(CachedTemplate(template))
+    node = _substitute_node(tnode, template.interpolations)
+    return HTMLProcessor(node)
