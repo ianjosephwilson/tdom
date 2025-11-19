@@ -107,7 +107,7 @@ def test_parse_entities_are_escaped():
 def test_interpolated_text_content():
     name = "Alice"
     node = html(t"<p>Hello, {name}!</p>")
-    #assert node == Element("p", children=[Text("Hello, "), Text("Alice"), Text("!")])
+    assert node == Element("p", children=[Text("Hello, "), Text("Alice"), Text("!")])
     assert str(node) == "<p>Hello, Alice!</p>"
 
 
