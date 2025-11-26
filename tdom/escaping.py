@@ -64,11 +64,7 @@ def escape_html_comment(text):
 def escape_html_style(text):
     # @TODO: We should maybe make this opt-in or throw a warning that says to
     # avoid dropping content in STYLEs.
-    LT = "&lt;"
-    close_str = "</style>"
-    close_str_re = re.compile(close_str, re.I | re.A)
-    replace_str = LT + close_str[1:]
-    return re.sub(close_str_re, replace_str, text)
+    return escape_html_content_in_tag('style', text)
 
 
 def escape_html_script(text):
@@ -98,3 +94,21 @@ def escape_html_script(text):
     for match_re, replace_text in match_to_replace:
         text = re.sub(match_re, replace_text, text)
     return text
+
+
+def escape_html_content_in_tag(parent_tag, content):
+    parent_tag = parent_tag.lower()
+    if parent_tag == 'script':
+        return escape_html_script(content)
+    elif parent_tag == '<!--':
+        return escape_html_comment(content)
+    elif parent_tag == 'style':
+        LT = "&lt;"
+        close_str = f"</{parent_tag}>"
+        # @TODO: This whole escaping business is probably be misguided... but we should cache this.
+        close_str_re = re.compile(close_str, re.I | re.A)
+        replace_str = LT + close_str[1:]
+        return re.sub(close_str_re, replace_str, content)
+    else:
+        # Fallback to nuclear solution.
+        return escape_html_text(content)
