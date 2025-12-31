@@ -1,5 +1,12 @@
-from .parser import parse_html
+from .parser import TemplateParser
 from .printer import pformat_tnode
+from .tnodes import TNode
+from string.templatelib import Template
+
+
+# SHIM
+def parse_html(t: Template) -> TNode:
+     return TemplateParser().parse(t)
 
 
 def test_printing():

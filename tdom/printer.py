@@ -3,27 +3,29 @@ from dataclasses import dataclass
 from markupsafe import escape as escape_html_text
 
 from .nodes import (
+    VOID_ELEMENTS,
+)
+from .tnodes import (
     TNode,
     TElement,
+    TComponent,
     TFragment,
     TText,
     TComment,
-    VOID_ELEMENTS,
-    DocumentType,
+    TDocumentType,
 )
 from .escaping import escape_html_script, escape_html_style, escape_html_comment
 
 
 def get_parent_tag_for_children(
-    node: TElement | TFragment, parent_tag: str | None
+    node: TComponent | TElement | TFragment, parent_tag: str | None
 ) -> str | None:
     match node:
         case TElement():
-            if node.component_info is None:
-                return node.tag
-            else:
-                return parent_tag
+            return node.tag
         case TFragment():
+            return parent_tag
+        case TComponent():
             return parent_tag
         case _:
             raise TypeError(
@@ -31,14 +33,13 @@ def get_parent_tag_for_children(
             )
 
 
-def get_starttag(node: TElement | TFragment) -> str:
+def get_starttag(node: TComponent | TElement | TFragment) -> str:
     match node:
         case TElement():
-            if not node.component_info:
-                attrs_str = f" {repr(node.attrs)}" if node.attrs else ""
-                return f"<{node.tag}{attrs_str}>"
-            else:
-                return f"<component-at-index-{node.component_info.starttag_interpolation_index} {repr(node.attrs)}>"
+            attrs_str = f" {repr(node.attrs)}" if node.attrs else ""
+            return f"<{node.tag}{attrs_str}>"
+        case TComponent():
+            return f"<component-at-index-{node.start_i_index} {repr(node.attrs)}>"
         case TFragment():
             return "<tnode-fragment>"
         case _:
@@ -47,13 +48,12 @@ def get_starttag(node: TElement | TFragment) -> str:
             )
 
 
-def get_endtag(node: TElement | TFragment) -> str:
+def get_endtag(node: TComponent | TElement | TFragment) -> str:
     match node:
         case TElement():
-            if not node.component_info:
-                return f"</{node.tag}>"
-            else:
-                return f"</component-at-index-{node.component_info.starttag_interpolation_index}>"
+            return f"</{node.tag}>"
+        case TComponent():
+            return f"</component-at-index-{node.start_i_index}>"
         case TFragment():
             return "</tnode-fragment>"
         case _:
@@ -65,10 +65,6 @@ def get_endtag(node: TElement | TFragment) -> str:
 @dataclass
 class Symbol:
     symbol_str: str
-
-
-def is_void_element(node):
-    return node.component_info is None and node.tag in VOID_ELEMENTS
 
 
 def get_nl():
@@ -116,13 +112,27 @@ def pformat_tnode(
     while q:
         level, parent_tag, node = q.pop()
         match node:
-            case DocumentType():
-                append_out(str(node), level)
+            case TDocumentType(text):
+                append_out(f"<!DOCTYPE {text}>", level)
             case Symbol():
                 append_out(node.symbol_str, level)
+            case TComponent():
+                append_out(get_starttag(node), level)
+                if node.start_i_index != node.end_i_index and node.end_i_index is not None:
+                    q.append((level, None, Symbol(get_endtag(node))))
+                    q.extend(
+                        [
+                            (
+                                level + 1,
+                                get_parent_tag_for_children(node, parent_tag),
+                                child,
+                            )
+                            for child in reversed(node.children)
+                        ]
+                    )
             case TElement():
                 append_out(get_starttag(node), level)
-                if not is_void_element(node):
+                if node.tag not in VOID_ELEMENTS:
                     # Maybe try something here when text is the last child or something
                     # q.append((0, None, Symbol(get_nl())))
                     q.append((level, None, Symbol(get_endtag(node))))
@@ -160,8 +170,8 @@ def pformat_tnode(
                         formatter = escape_html_text
                 else:
                     formatter = escape_html_comment
-                count = len(list(node.text_t))
-                for index, part in enumerate(node.text_t):
+                count = len(list(node.ref))
+                for index, part in enumerate(node.ref):
                     indent = level if index == 0 else 0
                     if isinstance(part, str):
                         if show_text:
@@ -180,7 +190,7 @@ def pformat_tnode(
                         text_fmt = "<text>{}</text>"
                     else:
                         text_fmt = "<slot>{}</slot>"
-                        text = "{" + str(part.value) + "}"
+                        text = "{" + str(part) + "}"
                     if text is not None:
                         append_out(text_fmt.format(text), indent, with_nl=False)
                         if index == count - 1:
