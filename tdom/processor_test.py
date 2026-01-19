@@ -196,10 +196,9 @@ def test_interpolated_in_content_node():
     assert node == Element(
         "style",
         children=[
-            Text("</style><script>alert('whoops');</script><style>"),
-            Text("</style><script>alert('whoops');</script><style>"),
+            Text("</style><script>alert('whoops');</script><style></style><script>alert('whoops');</script><style>"),
         ],
-    )
+    ), "Text should be consolidated for proper escaping."
     LT = "&lt;"
     assert (
         str(node)

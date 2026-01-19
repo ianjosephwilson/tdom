@@ -530,6 +530,55 @@ class ChildrenTemplate:
     interpolations: tuple[Interpolation, ...]
 
 
+def render_text_without_recursion(interpolations: tuple[Interpolation, ...], parent_tag: str, ref: TemplateRef) -> str | None:
+    if ref.is_literal:
+        return ref.strings[0]
+    elif ref.is_singleton:
+        value = interpolations[ref.i_indexes[0]].value
+        if value is None or value is False:
+            return None
+        elif isinstance(value, str):
+            return value
+        elif hasattr(value, "__html__"):
+            return Markup(value.__html__())
+        elif isinstance(value, (Template, Iterable)):
+            raise ValueError(
+                f"Recursive includes are not supported within {parent_tag}"
+            )
+        else:
+            return str(value)
+    else:
+        text = []
+        last_s_index = len(ref.strings) - 1
+        for index, part in enumerate(ref.strings):
+            if isinstance(part, str):
+                if part:
+                    text.append(part)
+            if index >= last_s_index:
+                # @NOTE: i_indexes only exist up until the 2nd to last string.
+                continue
+            value = interpolations[ref.i_indexes[index]].value
+            if value is None or value is False:
+                continue
+            elif isinstance(value, str):
+                if value:
+                    text.append(value)
+            elif isinstance(value, (Template, Iterable)):
+                raise ValueError(
+                    f"Recursive includes are not supported within {parent_tag}"
+                )
+            elif hasattr(value, "__html__"):
+                raise ValueError(
+                    f"Non-exact trusted interpolations are not supported within {parent_tag}"
+                )
+            else:
+                value_str = str(value)
+                if value_str:
+                    text.append(value_str)
+        return "".join(text)
+
+
+
 def _resolve_t_node(t_node: TNode, interpolations: tuple[Interpolation, ...]) -> Node:
     """Resolve a TNode tree into a Node tree by processing interpolations."""
     root = Fragment(children=[])
@@ -552,19 +601,23 @@ def _resolve_t_node(t_node: TNode, interpolations: tuple[Interpolation, ...]) ->
                 parent.children.append(t_node)
             case TText(ref=ref):
                 if isinstance(parent, Element) and parent.tag in CDATA_CONTENT_ELEMENTS:
-                    raise NotImplementedError('Need to render this all at once WITH limitations')
+                    # Must be handled all at once.
+                    value = render_text_without_recursion(interpolations, parent.tag, ref)
+                    if value is not None:
+                        parent.children.append(Text(value))
                 elif isinstance(parent, Element) and parent.tag in RCDATA_CONTENT_ELEMENTS:
-                    raise NotImplementedError('Need to render this all at once WITH limitations')
+                    # We can handle all at once because there are no non-text children and everything must be string-ified.
+                    value = render_text_without_recursion(interpolations, parent.tag, ref)
+                    if value is not None:
+                        parent.children.append(Text(value))
                 else:
                     # Continue but maybe we should apply checks to parent to make sure
                     # everything is expected....
-                    pass
-
-                if ref.is_literal:
-                    parent.children.append(Text(ref.strings[0]))
-                else:
-                    it = iter(_resolve_ref(ref, interpolations))
-                    q.append(('iter', (parent, it, interpolations)))
+                    if ref.is_literal:
+                        parent.children.append(Text(ref.strings[0]))
+                    else:
+                        it = iter(_resolve_ref(ref, interpolations))
+                        q.append(('iter', (parent, it, interpolations)))
             case TComment(ref=ref):
                 comment_t = _resolve_ref(ref, interpolations)
                 comment = format_template(comment_t)
