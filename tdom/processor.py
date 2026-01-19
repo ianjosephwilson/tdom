@@ -662,6 +662,8 @@ def _resolve_t_node(t_node: TNode, interpolations: tuple[Interpolation, ...]) ->
                 else:
                     component_config = {}
 
+                assert isinstance(component_config, dict), "For type checker until we figure out how to handle this."
+
                 if result is ChildrenTemplate:
                     q.append(('child', (parent, result[0], result[1])))
                 elif isinstance(result, Template):
