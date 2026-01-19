@@ -5,6 +5,7 @@ from functools import lru_cache
 from string.templatelib import Interpolation, Template
 from dataclasses import dataclass
 from contextvars import ContextVar
+import inspect
 
 from markupsafe import Markup
 
@@ -430,14 +431,8 @@ def _prep_component_kwargs(
 
 type ComponentReturnValueSimple = None | Template
 type ComponentConfig = dict[str, object]
-type ComponentReturnValueSimpleWithConfig = (
-    ComponentReturnValueSimple | tuple[ComponentReturnValueSimple, ComponentConfig]
-)
-type ComponentReturnValueZeroArgCallable = Callable[
-    [], ComponentReturnValueSimpleWithConfig
-]
 type ComponentReturnValue = (
-    ComponentReturnValueSimple | ComponentReturnValueZeroArgCallable
+    ComponentReturnValueSimple | tuple[ComponentReturnValueSimple, ComponentConfig]
 )
 
 
@@ -488,7 +483,10 @@ def _invoke_component(
         system=dict(children=children),
     )
 
-    res = value(**kwargs)
+    if inspect.isclass(value):
+        res = value(**kwargs)()
+    else:
+        res = value(**kwargs)
     return t.cast(ComponentReturnValue, res)
 
 
@@ -689,16 +687,11 @@ def _resolve_t_node(t_root: TNode, interpolations: tuple[Interpolation, ...]) ->
                     and end_interpolation.value != start_interpolation.value
                 ):
                     raise TypeError("Mismatched component start and end callables.")
-                invoke_result = _invoke_component(
+                comp_result = _invoke_component(
                     attrs=resolved_attrs,
                     children=ChildrenTemplate(children, interpolations),
                     interpolation=start_interpolation,
                 )
-
-                if callable(invoke_result):
-                    comp_result = invoke_result()
-                else:
-                    comp_result = invoke_result
 
                 if isinstance(comp_result, tuple) and len(comp_result) == 2:
                     # Pop the config out from the result
