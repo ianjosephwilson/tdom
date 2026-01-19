@@ -136,6 +136,12 @@ def interpolate_attrs(
 
 
 type InterpolateComponentInfo = tuple[str, Sequence[TAttribute], int, int | None, int]
+type ComponentReturnValueSimple = None | Template
+type ComponentReturnConfig = dict[str, object]
+type ComponentReturnValue = (
+    ComponentReturnValueSimple
+    | tuple[ComponentReturnValueSimple, ComponentReturnConfig]
+)
 
 
 def interpolate_component(
@@ -188,9 +194,9 @@ def interpolate_component(
     if inspect.isclass(component_callable):
         # Class components are built and returned and then need to be called
         # to get their template.
-        res = component_callable(**kwargs)()
+        res = t.cast(ComponentReturnValue, component_callable(**kwargs)())
     else:
-        res = component_callable(**kwargs)
+        res = t.cast(ComponentReturnValue, component_callable(**kwargs))
 
     # @DESIGN: Determine return signature via runtime inspection?
     if isinstance(res, tuple):
@@ -203,6 +209,10 @@ def interpolate_component(
 
         # @DESIGN: Use open-ended dict for opt-in second return argument?
         context_values = comp_info.get("context_values", ()) if comp_info else ()
+        if not isinstance(context_values, tuple):
+            raise TypeError(
+                f"Context values must be a tuple, found {type(context_values)}."
+            )
         for entry in context_values:
             if not isinstance(entry, tuple):
                 raise ValueError(
