@@ -206,29 +206,36 @@ def interpolate_component(
             )
         else:
             result_template, comp_info = res
-
-        # @DESIGN: Use open-ended dict for opt-in second return argument?
-        context_values = comp_info.get("context_values", ()) if comp_info else ()
-        if not isinstance(context_values, tuple):
-            raise TypeError(
-                f"Context values must be a tuple, found {type(context_values)}."
-            )
-        for entry in context_values:
-            if not isinstance(entry, tuple):
-                raise ValueError(
-                    f"Entries for context_values must be 2-tuples but found type: {type(entry)}."
+            # @DESIGN: Use open-ended dict for opt-in second return argument?
+            context_values = comp_info.get("context_values", ())
+            if not isinstance(context_values, tuple):
+                raise TypeError(
+                    f"Context values must be a tuple, found {type(context_values)}."
                 )
-            elif len(entry) != 2:
-                raise ValueError(
-                    f"Entries for context_values must be 2-tuples but found len(): {len(entry)}."
-                )
-            elif not isinstance(entry[0], ContextVar):
-                raise ValueError(
-                    f"Invalid context variable in component return value: {type(entry[0])}"
-                )
+            # @TYPING: We need runtime checks for typing but uv does not
+            # pick them up so we put each item back into a list and then back into a
+            # tuple and for some reason that works...
+            cvs = []
+            for entry in context_values:
+                if not isinstance(entry, tuple):
+                    raise ValueError(
+                        f"Entries for context_values must be 2-tuples but found type: {type(entry)}."
+                    )
+                elif len(entry) != 2:
+                    raise ValueError(
+                        f"Entries for context_values must be 2-tuples but found len(): {len(entry)}."
+                    )
+                elif not isinstance(entry[0], ContextVar):
+                    raise ValueError(
+                        f"Invalid context variable in component return value: {type(entry[0])}"
+                    )
+                else:
+                    # @TYPING: See below
+                    cvs.append(entry)
+            # @TYPING: Hack to make uv pickup runtime type checks, pyright seems to work ok without.
+            context_values = tuple(cvs)
     else:
         result_template = res
-        comp_info = None
         context_values = ()
 
     if isinstance(result_template, Template):
@@ -720,7 +727,7 @@ class RenderService:
         bf: list[str],
         template: Template,
         struct_t: Template,
-        context_values: tuple[tuple[ContextVar, object]] | None = None,
+        context_values: tuple[tuple[ContextVar, object], ...] = (),
     ) -> Iterable[tuple[InterpolatorProto, Template, InterpolateInfo]]:
         if context_values:
             cm = ContextVarSetter(context_values=context_values)
