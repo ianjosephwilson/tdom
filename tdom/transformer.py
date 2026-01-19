@@ -175,6 +175,13 @@ def interpolate_component(
     callable_info = get_callable_info(component_callable)
     kwargs = _prep_component_kwargs(callable_info, resolved_attrs, system=system_dict)
     res = component_callable(**kwargs)
+
+    # @DESIGN: callable or has_attr('__call__') for class components?
+    if callable(res):
+        # Class components are built and returned and then need to be called
+        # to get their template.
+        res = res()
+
     # @DESIGN: Determine return signature via runtime inspection?
     if isinstance(res, tuple):
         result_template, comp_info = res
