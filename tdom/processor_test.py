@@ -196,7 +196,9 @@ def test_interpolated_in_content_node():
     assert node == Element(
         "style",
         children=[
-            Text("</style><script>alert('whoops');</script><style></style><script>alert('whoops');</script><style>"),
+            Text(
+                "</style><script>alert('whoops');</script><style></style><script>alert('whoops');</script><style>"
+            ),
         ],
     ), "Text should be consolidated for proper escaping."
     LT = "&lt;"
@@ -241,7 +243,9 @@ def test_interpolated_none_content():
     assert str(node) == "<div></div>"
 
 
-@pytest.mark.skip('Restrict component typing signature. Why get this later? Performance?')
+@pytest.mark.skip(
+    "Restrict component typing signature. Why get this later? Performance?"
+)
 def test_interpolated_zero_arg_function():
     def get_value():
         return "dynamic"
@@ -252,7 +256,7 @@ def test_interpolated_zero_arg_function():
     )
 
 
-@pytest.mark.skip('Restrict component typing signature. Related to zero arg.')
+@pytest.mark.skip("Restrict component typing signature. Related to zero arg.")
 def test_interpolated_multi_arg_function_fails():
     def add(a, b):  # pragma: no cover
         return a + b
@@ -375,7 +379,7 @@ def test_interpolated_template_content():
     assert str(node) == "<div><span>Child</span></div>"
 
 
-@pytest.mark.skip('The str is the same but we use markup to simplify the impl.')
+@pytest.mark.skip("The str is the same but we use markup to simplify the impl.")
 def test_interpolated_element_content():
     child = html(t"<span>Child</span>")
     node = html(t"<div>{child}</div>")
@@ -1235,7 +1239,9 @@ def test_nested_component_gh23():
     assert str(node) == "Hello World"
 
 
-@pytest.mark.skip('Restrict component typing signature. Can we just nest the iterable in the template? Does it make sense for a component to return all the things that an interpolation can take as a value?')
+@pytest.mark.skip(
+    "Restrict component typing signature. Can we just nest the iterable in the template? Does it make sense for a component to return all the things that an interpolation can take as a value?"
+)
 def test_component_returning_iterable():
     def Items() -> t.Iterable:
         for i in range(2):
