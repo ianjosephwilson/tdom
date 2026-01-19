@@ -174,6 +174,16 @@ def interpolate_component(
     # @DESIGN: Determine return signature from callable info (cached inspection) ?
     callable_info = get_callable_info(component_callable)
     kwargs = _prep_component_kwargs(callable_info, resolved_attrs, system=system_dict)
+
+    # @DESIGN: We can try to wrap this type resolution up but it is
+    # hard to tell component authors what should be returned if we have this
+    # union, and this is actually the simplified one without iterable, bool or
+    # Node.
+
+    # Component() ->
+    # None | Template | tuple[None | Template, dict[str, object]] |
+    # Callable[[], None | Template | tuple[None | Template, dict[str, object]]]
+
     res = component_callable(**kwargs)
 
     # @DESIGN: callable or has_attr('__call__') for class components?
@@ -184,17 +194,34 @@ def interpolate_component(
 
     # @DESIGN: Determine return signature via runtime inspection?
     if isinstance(res, tuple):
-        result_template, comp_info = res
+        if len(res) != 2:
+            raise ValueError(
+                f"Tuple form of component return value must be len() 2, not: {len(res)}"
+            )
+        else:
+            result_template, comp_info = res
+
+        # @DESIGN: Use open-ended dict for opt-in second return argument?
         context_values = comp_info.get("context_values", ()) if comp_info else ()
+        for entry in context_values:
+            if not isinstance(entry, tuple):
+                raise ValueError(
+                    f"Entries for context_values must be 2-tuples but found type: {type(entry)}."
+                )
+            elif len(entry) != 2:
+                raise ValueError(
+                    f"Entries for context_values must be 2-tuples but found len(): {len(entry)}."
+                )
+            elif not isinstance(entry[0], ContextVar):
+                raise ValueError(
+                    f"Invalid context variable in component return value: {type(entry[0])}"
+                )
     else:
         result_template = res
         comp_info = None
         context_values = ()
 
-    # @DESIGN: Use open-ended dict for opt-in second return argument?
-    context_values = comp_info.get("context_values", ()) if comp_info else ()
-
-    if result_template:
+    if isinstance(result_template, Template):
         result_struct = render_api.transform_api.transform_template(result_template)
         if context_values:
             walker = render_api.walk_template_with_context(
@@ -203,6 +230,10 @@ def interpolate_component(
         else:
             walker = render_api.walk_template(bf, result_template, result_struct)
         return (container_tag, iter(walker))
+    elif result_template is None:
+        pass
+    else:
+        raise ValueError(f"Unknown component return value: {type(result_template)}")
 
 
 type InterpolateRawTextInfo = tuple[str, Template]

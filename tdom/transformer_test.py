@@ -3,6 +3,9 @@ from string.templatelib import Template
 from markupsafe import Markup, escape as markupsafe_escape
 import typing as t
 import pytest
+from dataclasses import dataclass
+from collections.abc import Callable
+from itertools import chain
 
 from .transformer import (
     render_service_factory,
@@ -339,4 +342,63 @@ def test_escape_structured_text():
     assert (
         render_api.render_template(content_t)
         == f"<div>{LT}script{GT}console.log({DQ}123!{DQ});{LT}/script{GT}</div>"
+    )
+
+
+@dataclass
+class Pager:
+    left_pages: tuple = ()
+    page: int = 0
+    right_pages: tuple = ()
+    prev_page: int | None = None
+    next_page: int | None = None
+
+
+@dataclass
+class PagerDisplay:
+    pager: Pager
+    paginate_url: Callable[[int], str]
+    root_classes: tuple[str, ...] = ("cb", "tc", "w-100")
+    part_classes: tuple[str, ...] = ("dib", "pa1")
+
+    def __call__(self) -> Template:
+        parts = [t"<div class={self.root_classes}>"]
+        if self.pager.prev_page:
+            parts.append(
+                t"<a class={self.part_classes} href={self.paginate_url(self.pager.prev_page)}>Prev</a>"
+            )
+        for left_page in self.pager.left_pages:
+            parts.append(
+                t'<a class={self.part_classes} href="{self.paginate_url(left_page)}">{left_page}</a>'
+            )
+        parts.append(t"<span class={self.part_classes}>{self.pager.page}</span>")
+        for right_page in self.pager.right_pages:
+            parts.append(
+                t'<a class={self.part_classes} href="{self.paginate_url(right_page)}">{right_page}</a>'
+            )
+        if self.pager.next_page:
+            parts.append(
+                t"<a class={self.part_classes} href={self.paginate_url(self.pager.next_page)}>Next</a>"
+            )
+        parts.append(t"</div>")
+        return Template(*chain.from_iterable(parts))
+
+
+def test_class_component():
+    def paginate_url(page):
+        return f"/pages?{page}"
+
+    def Footer(pager, paginate_url, footer_classes=("footer",)):
+        return t"<div class={footer_classes}><{PagerDisplay} pager={pager} paginate_url={paginate_url} /></div>"
+
+    pager = Pager(
+        left_pages=(1, 2), page=3, right_pages=(4, 5), next_page=6, prev_page=None
+    )
+    content_t = t"<{Footer} pager={pager} paginate_url={paginate_url} />"
+    render_api = render_service_factory()
+    res = render_api.render_template(content_t)
+    print(res)
+    assert (
+        res
+        == '<div class="footer"><div class="cb tc w-100"><a href="/pages?1" class="dib pa1">1</a><a href="/pages?2" class="dib pa1">2</a><span class="dib pa1">3</span><a href="/pages?4" class="dib pa1">4</a><a href="/pages?5" class="dib pa1">5</a><a href="/pages?6" class="dib pa1">Next</a></div></div>'
     )
