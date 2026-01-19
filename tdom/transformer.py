@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from contextvars import ContextVar, Token
 import functools
 from markupsafe import Markup
+import inspect
 
 from .format import format_interpolation
 from .parser import TemplateParser, HTMLAttributesDict
@@ -184,13 +185,12 @@ def interpolate_component(
     # None | Template | tuple[None | Template, dict[str, object]] |
     # Callable[[], None | Template | tuple[None | Template, dict[str, object]]]
 
-    res = component_callable(**kwargs)
-
-    # @DESIGN: callable or has_attr('__call__') for class components?
-    if callable(res):
+    if inspect.isclass(component_callable):
         # Class components are built and returned and then need to be called
         # to get their template.
-        res = res()
+        res = component_callable(**kwargs)()
+    else:
+        res = component_callable(**kwargs)
 
     # @DESIGN: Determine return signature via runtime inspection?
     if isinstance(res, tuple):
