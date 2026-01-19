@@ -4,6 +4,7 @@ from collections.abc import Iterable, Sequence, Callable
 from functools import lru_cache
 from string.templatelib import Interpolation, Template
 from dataclasses import dataclass
+from contextvars import ContextVar
 
 from markupsafe import Markup
 
@@ -427,11 +428,24 @@ def _prep_component_kwargs(
     return kwargs
 
 
+type ComponentReturnValueSimple = None | Template
+type ComponentConfig = dict[str, object]
+type ComponentReturnValueSimpleWithConfig = (
+    ComponentReturnValueSimple | tuple[ComponentReturnValueSimple, ComponentConfig]
+)
+type ComponentReturnValueZeroArgCallable = Callable[
+    [], ComponentReturnValueSimpleWithConfig
+]
+type ComponentReturnValue = (
+    ComponentReturnValueSimple | ComponentReturnValueZeroArgCallable
+)
+
+
 def _invoke_component(
     attrs: AttributesDict,
-    children: list[TNode],
+    children: ChildrenTemplate,
     interpolation: Interpolation,
-) -> Node:
+) -> ComponentReturnValue:
     """
     Invoke a component callable with the provided attributes and children.
 
@@ -465,6 +479,7 @@ def _invoke_component(
         raise TypeError(
             f"Expected a callable for component invocation, got {type(value).__name__}"
         )
+
     callable_info = get_callable_info(value)
 
     kwargs = _prep_component_kwargs(
@@ -473,7 +488,8 @@ def _invoke_component(
         system=dict(children=children),
     )
 
-    return value(**kwargs)
+    res = value(**kwargs)
+    return t.cast(ComponentReturnValue, res)
 
 
 def _resolve_ref(
@@ -587,10 +603,15 @@ def render_text_without_recursion(
         return "".join(text)
 
 
-def _resolve_t_node(t_node: TNode, interpolations: tuple[Interpolation, ...]) -> Node:
+type WorkItemDetails = tuple[
+    Element | Fragment, TNode | Iterable, tuple[Interpolation, ...]
+]
+
+
+def _resolve_t_node(t_root: TNode, interpolations: tuple[Interpolation, ...]) -> Node:
     """Resolve a TNode tree into a Node tree by processing interpolations."""
     root = Fragment(children=[])
-    q = [("child", (root, t_node, interpolations))]
+    q: list[tuple[str, WorkItemDetails]] = [("child", (root, t_root, interpolations))]
     while q:
         work = q.pop()
         if work[0] == "child":
@@ -668,42 +689,82 @@ def _resolve_t_node(t_node: TNode, interpolations: tuple[Interpolation, ...]) ->
                     and end_interpolation.value != start_interpolation.value
                 ):
                     raise TypeError("Mismatched component start and end callables.")
-                result = _invoke_component(
+                invoke_result = _invoke_component(
                     attrs=resolved_attrs,
                     children=ChildrenTemplate(children, interpolations),
                     interpolation=start_interpolation,
                 )
 
-                if hasattr(result, "__call__"):
-                    result = result()
+                if callable(invoke_result):
+                    comp_result = invoke_result()
+                else:
+                    comp_result = invoke_result
 
-                if isinstance(result, tuple) and len(result) == 2:
+                if isinstance(comp_result, tuple) and len(comp_result) == 2:
                     # Pop the config out from the result
-                    result, component_config = result
+                    comp_result, component_config = comp_result
+                    context_values = component_config.get("context_values", ())
+                    if not isinstance(context_values, tuple):
+                        raise ValueError(
+                            f"Context values must consist of a sequence, type(): found {type(context_values)}"
+                        )
+                    for cv in context_values:
+                        if not isinstance(cv, tuple):
+                            raise ValueError(
+                                f"Context value entries must be 2-tuples, found type(): {type(cv)}"
+                            )
+                        elif len(cv) != 2:
+                            raise ValueError(
+                                f"Context value entries must be 2-tuples, bound len(): {len(cv)}"
+                            )
+                        elif not isinstance(cv[0], ContextVar):
+                            raise ValueError(
+                                f"Context values must have a ContextVar as their first entry, found type(): {type(cv[0])}"
+                            )
                 else:
                     component_config = {}
+                    context_values = ()
 
                 assert isinstance(component_config, dict), (
                     "For type checker until we figure out how to handle this."
                 )
 
-                if result is ChildrenTemplate:
-                    q.append(("child", (parent, result[0], result[1])))
-                elif isinstance(result, Template):
-                    q.append(
-                        ("child", (parent, _tnode_html(result), result.interpolations))
-                    )
-                elif result is None:
-                    pass
-                elif isinstance(result, Node):
-                    # @DESIGN: @TODO: Probably remove this whole thing or make it configurable.
-                    if isinstance(result, Fragment):
-                        parent.children.extend(result.children)
+                if comp_result is ChildrenTemplate:
+                    # @DESIGN: @TODO: Process template via iterator within a context manager to set context vars.
+                    if not context_values:
+                        q.append(("child", (parent, comp_result[0], comp_result[1])))
                     else:
-                        parent.children.append(result)
+                        raise NotImplementedError(
+                            "Context values have not implemented."
+                        )
+                elif isinstance(comp_result, Template):
+                    # @DESIGN: @TODO: Process template via iterator within a context manager to set context vars.
+                    if not context_values:
+                        q.append(
+                            (
+                                "child",
+                                (
+                                    parent,
+                                    _tnode_html(comp_result),
+                                    comp_result.interpolations,
+                                ),
+                            )
+                        )
+                    else:
+                        raise NotImplementedError(
+                            "Context values have not implemented."
+                        )
+                elif comp_result is None:
+                    pass
+                elif isinstance(comp_result, Node):
+                    # @DESIGN: @TODO: Probably remove this whole thing or make it configurable.
+                    if isinstance(comp_result, Fragment):
+                        parent.children.extend(comp_result.children)
+                    else:
+                        parent.children.append(comp_result)
                 else:
                     raise ValueError(
-                        f"Unknown component callable type: {type(result).__name__}"
+                        f"Unknown component callable type: {type(comp_result).__name__}"
                     )
             case _:
                 raise ValueError(f"Unknown TNode type: {type(t_node).__name__}")
