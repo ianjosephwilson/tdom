@@ -10,7 +10,16 @@ from markupsafe import Markup
 from .callables import get_callable_info, CallableInfo
 from .format import format_interpolation as base_format_interpolation
 from .format import format_template
-from .nodes import Comment, DocumentType, Element, Fragment, Node, Text
+from .nodes import (
+    Comment,
+    DocumentType,
+    Element,
+    Fragment,
+    Node,
+    Text,
+    CDATA_CONTENT_ELEMENTS,
+    RCDATA_CONTENT_ELEMENTS,
+)
 from .parser import (
     HTMLAttribute,
     HTMLAttributesDict,
@@ -380,58 +389,6 @@ def _resolve_attrs(
     return _resolve_html_attrs(interpolated_attrs)
 
 
-def _flatten_nodes(nodes: t.Iterable[Node]) -> list[Node]:
-    """Flatten a list of Nodes, expanding any Fragments."""
-    flat: list[Node] = []
-    for node in nodes:
-        if isinstance(node, Fragment):
-            flat.extend(node.children)
-        else:
-            flat.append(node)
-    return flat
-
-
-def _substitute_and_flatten_children(
-    children: t.Iterable[TNode], interpolations: tuple[Interpolation, ...]
-) -> list[Node]:
-    """Substitute placeholders in a list of children and flatten any fragments."""
-    resolved = [_resolve_t_node(child, interpolations) for child in children]
-    flat = _flatten_nodes(resolved)
-    return flat
-
-
-def _node_from_value(value: object) -> Node:
-    """
-    Convert an arbitrary value to a Node.
-
-    This is the primary action performed when replacing interpolations in child
-    content positions.
-    """
-    match value:
-        case str():
-            return Text(value)
-        case Node():
-            return value
-        case Template():
-            return html(value)
-        # Consider: falsey values, not just False and None?
-        case False | None:
-            return Fragment(children=[])
-        case Iterable():
-            children = [_node_from_value(v) for v in value]
-            return Fragment(children=children)
-        case HasHTMLDunder():
-            # CONSIDER: should we do this lazily?
-            return Text(Markup(value.__html__()))
-        case c if callable(c):
-            # Treat all callable values in child content positions as if
-            # they are zero-arg functions that return a value to be rendered.
-            return _node_from_value(c())
-        case _:
-            # CONSIDER: should we do this lazily?
-            return Text(str(value))
-
-
 def _kebab_to_snake(name: str) -> str:
     """Convert a kebab-case name to snake_case."""
     return name.replace("-", "_").lower()
@@ -472,7 +429,7 @@ def _prep_component_kwargs(
 
 def _invoke_component(
     attrs: AttributesDict,
-    children: list[Node],  # TODO: why not TNode, though?
+    children: list[TNode],
     interpolation: Interpolation,
 ) -> Node:
     """
@@ -511,11 +468,10 @@ def _invoke_component(
     callable_info = get_callable_info(value)
 
     kwargs = _prep_component_kwargs(
-        callable_info, attrs, system={"children": tuple(children)}
+        callable_info, attrs, system=dict(children=children),
     )
 
-    result = value(**kwargs)
-    return _node_from_value(result)
+    return value(**kwargs)
 
 
 def _resolve_ref(
@@ -525,82 +481,165 @@ def _resolve_ref(
     return template_from_parts(ref.strings, resolved)
 
 
-def _resolve_t_text_ref(
-    ref: TemplateRef, interpolations: tuple[Interpolation, ...]
-) -> Text | Fragment:
-    """Resolve a TText ref into Text or Fragment by processing interpolations."""
-    if ref.is_literal:
-        return Text(ref.strings[0])
+def _resolve_iter(q, parent, it, interpolations):
+    for part in it:
+        if isinstance(part, Interpolation):
+            value = format_interpolation(part)
+        else:
+            value = part
+        match value:
+            case str():
+                parent.children.append(Text(value))
+            case ChildrenTemplate():
+                # Startup where we left off.
+                q.append(('iter', (parent, it, interpolations)))
+                # Push this onto q so we start with this tnode.
+                q.extend(('child', (parent, child, value.interpolations)) for child in value.children)
+                break
+            case Template():
+                # Startup where we left off.
+                q.append(('iter', (parent, it, interpolations)))
+                # Push this onto q so we start with this new template's tnode.
+                q.append(('child', (parent, _tnode_html(value), value.interpolations)))
+                # Stop iterating here (we will pickup again)
+                break
+            case Iterable():
+                # Startup where we left off when we get back.
+                q.append(('iter', (parent, it, interpolations)))
+                # Push this onto q so we start in this new iterator.
+                # @TODO: Proably avoid wrapping in Interpolation ?
+                q.append(('iter', (parent, iter(Interpolation(v) for v in value), ()))) #interpolations
+                # Stop iterating here (we will pickup again)
+                break
+            case HasHTMLDunder():
+                # CONSIDER: should we do this lazily?
+                parent.children.append(Text(Markup(value.__html__())))
+            case None:
+                continue
+            case False:
+                continue
+            case _:
+                # Just coerce to string...
+                parent.children.append(Text(str(value)))
 
-    parts = [
-        Text(part)
-        if isinstance(part, str)
-        else _node_from_value(format_interpolation(part))
-        for part in _resolve_ref(ref, interpolations)
-    ]
-    flat = _flatten_nodes(parts)
 
-    if len(flat) == 1 and isinstance(flat[0], Text):
-        return flat[0]
-
-    return Fragment(children=flat)
+@dataclass(frozen=True)
+class ChildrenTemplate:
+    # THIS... IS... IT... The structured template IS BACK! BB!
+    children: tuple[TNode, ...]
+    interpolations: tuple[Interpolation, ...]
 
 
 def _resolve_t_node(t_node: TNode, interpolations: tuple[Interpolation, ...]) -> Node:
     """Resolve a TNode tree into a Node tree by processing interpolations."""
-    match t_node:
-        case TText(ref=ref):
-            return _resolve_t_text_ref(ref, interpolations)
-        case TComment(ref=ref):
-            comment_t = _resolve_ref(ref, interpolations)
-            comment = format_template(comment_t)
-            return Comment(comment)
-        case TDocumentType(text=text):
-            return DocumentType(text)
-        case TFragment(children=children):
-            resolved_children = _substitute_and_flatten_children(
-                children, interpolations
-            )
-            return Fragment(children=resolved_children)
-        case TElement(tag=tag, attrs=attrs, children=children):
-            resolved_attrs = _resolve_attrs(attrs, interpolations)
-            resolved_children = _substitute_and_flatten_children(
-                children, interpolations
-            )
-            return Element(tag=tag, attrs=resolved_attrs, children=resolved_children)
-        case TComponent(
-            start_i_index=start_i_index,
-            end_i_index=end_i_index,
-            attrs=t_attrs,
-            children=children,
-        ):
-            start_interpolation = interpolations[start_i_index]
-            end_interpolation = (
-                None if end_i_index is None else interpolations[end_i_index]
-            )
-            resolved_attrs = _resolve_t_attrs(t_attrs, interpolations)
-            resolved_children = _substitute_and_flatten_children(
-                children, interpolations
-            )
-            # HERE ALSO BE DRAGONS: validate matching start/end callables, since
-            # the underlying TemplateParser cannot do that for us.
-            if (
-                end_interpolation is not None
-                and end_interpolation.value != start_interpolation.value
+    root = Fragment(children=[])
+    q = [('child', (root, t_node, interpolations))]
+    while q:
+        work = q.pop()
+        if work[0] == 'child':
+            parent, t_node, interpolations = work[1]
+        elif work[0] == 'iter':
+            parent, it, interpolations = work[1]
+            _resolve_iter(q, parent, it, interpolations)
+            continue
+        else:
+            raise ValueError(f'Unexpected work type {work[0]}')
+
+        # figure out what to do with the child and then push the result into the parent
+        match t_node:
+            case Node():
+                # @TODO: We should try to cut this out.
+                parent.children.append(t_node)
+            case TText(ref=ref):
+                if isinstance(parent, Element) and parent.tag in CDATA_CONTENT_ELEMENTS:
+                    raise NotImplementedError('Need to render this all at once WITH limitations')
+                elif isinstance(parent, Element) and parent.tag in RCDATA_CONTENT_ELEMENTS:
+                    raise NotImplementedError('Need to render this all at once WITH limitations')
+                else:
+                    # Continue but maybe we should apply checks to parent to make sure
+                    # everything is expected....
+                    pass
+
+                if ref.is_literal:
+                    parent.children.append(Text(ref.strings[0]))
+                else:
+                    it = iter(_resolve_ref(ref, interpolations))
+                    q.append(('iter', (parent, it, interpolations)))
+            case TComment(ref=ref):
+                comment_t = _resolve_ref(ref, interpolations)
+                comment = format_template(comment_t)
+                parent.children.append(Comment(comment))
+            case TDocumentType(text=text):
+                parent.children.append(DocumentType(text))
+            case TFragment(children=children):
+                q.extend(('child', (parent, child, interpolations)) for child in reversed(children))
+            case TElement(tag=tag, attrs=attrs, children=children):
+                resolved_attrs = _resolve_attrs(attrs, interpolations)
+                nested_parent = Element(tag=tag, attrs=resolved_attrs, children=[])
+                parent.children.append(nested_parent)
+                q.extend(('child', (nested_parent, child, interpolations)) for child in reversed(children))
+            case TComponent(
+                start_i_index=start_i_index,
+                end_i_index=end_i_index,
+                attrs=t_attrs,
+                children=children,
             ):
-                raise TypeError("Mismatched component start and end callables.")
-            return _invoke_component(
-                attrs=resolved_attrs,
-                children=resolved_children,
-                interpolation=start_interpolation,
-            )
-        case _:
-            raise ValueError(f"Unknown TNode type: {type(t_node).__name__}")
+                start_interpolation = interpolations[start_i_index]
+                end_interpolation = (
+                    None if end_i_index is None else interpolations[end_i_index]
+                )
+                resolved_attrs = _resolve_t_attrs(t_attrs, interpolations)
+                if (
+                    end_interpolation is not None
+                    and end_interpolation.value != start_interpolation.value
+                ):
+                    raise TypeError("Mismatched component start and end callables.")
+                result = _invoke_component(
+                    attrs=resolved_attrs,
+                    children=ChildrenTemplate(children, interpolations),
+                    interpolation=start_interpolation,
+                )
+
+                if hasattr(result, '__call__'):
+                    result = result()
+
+                if isinstance(result, tuple) and len(result) == 2:
+                    # Pop the config out from the result
+                    result, component_config = result
+                else:
+                    component_config = {}
+
+                if result is ChildrenTemplate:
+                    q.append(('child', (parent, result[0], result[1])))
+                elif isinstance(result, Template):
+                    q.append(('child', (parent, _tnode_html(result), result.interpolations)))
+                elif result is None:
+                    pass
+                elif isinstance(result, Node):
+                    # @DESIGN: @TODO: Probably remove this whole thing or make it configurable.
+                    if isinstance(result, Fragment):
+                        parent.children.extend(result.children)
+                    else:
+                        parent.children.append(result)
+                else:
+                    raise ValueError(f"Unknown component callable type: {type(result).__name__}")
+            case _:
+                raise ValueError(f"Unknown TNode type: {type(t_node).__name__}")
+
+
+    if len(root.children) == 1:
+        return root.children[0]
+    else:
+        return root
 
 
 # --------------------------------------------------------------------------
 # Public API
 # --------------------------------------------------------------------------
+
+def _tnode_html(template: Template) -> TNode:
+    cachable = CachableTemplate(template)
+    return _parse_and_cache(cachable)
 
 
 def html(template: Template) -> Node:
