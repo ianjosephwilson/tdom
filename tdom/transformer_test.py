@@ -385,10 +385,10 @@ class PagerDisplay:
 
 
 def test_class_component():
-    def paginate_url(page):
-        return f"/pages?{page}"
+    def paginate_url(page: int) -> str:
+        return f"/pages?page={page}"
 
-    def Footer(pager, paginate_url, footer_classes=("footer",)):
+    def Footer(pager, paginate_url, footer_classes=("footer",)) -> Template:
         return t"<div class={footer_classes}><{PagerDisplay} pager={pager} paginate_url={paginate_url} /></div>"
 
     pager = Pager(
@@ -400,5 +400,5 @@ def test_class_component():
     print(res)
     assert (
         res
-        == '<div class="footer"><div class="cb tc w-100"><a href="/pages?1" class="dib pa1">1</a><a href="/pages?2" class="dib pa1">2</a><span class="dib pa1">3</span><a href="/pages?4" class="dib pa1">4</a><a href="/pages?5" class="dib pa1">5</a><a href="/pages?6" class="dib pa1">Next</a></div></div>'
+        == '<div class="footer"><div class="cb tc w-100"><a href="/pages?page=1" class="dib pa1">1</a><a href="/pages?page=2" class="dib pa1">2</a><span class="dib pa1">3</span><a href="/pages?page=4" class="dib pa1">4</a><a href="/pages?page=5" class="dib pa1">5</a><a href="/pages?page=6" class="dib pa1">Next</a></div></div>'
     )
