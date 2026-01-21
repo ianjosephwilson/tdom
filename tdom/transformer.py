@@ -145,10 +145,10 @@ type ComponentReturnValue = (
 
 
 def invoke_component(
-    component_callable: Callable, #@TODO: Callable[..., ComponentReturnValue] | Callable[..., Callable[[], ComponentReturnValue]],
+    component_callable: Callable,  # @TODO: Callable[..., ComponentReturnValue] | Callable[..., Callable[[], ComponentReturnValue]],
     kwargs: dict[str, object],
 ) -> tuple[ComponentReturnValueSimple, tuple[tuple[ContextVar, object], ...]]:
-    # @DESIGN: Can we just solve this before calling in here?  
+    # @DESIGN: Can we just solve this before calling in here?
     if inspect.isclass(component_callable):
         res = t.cast(ComponentReturnValue, component_callable(**kwargs)())
     else:
@@ -217,7 +217,7 @@ def interpolate_component(
         if component_callable != template.interpolations[end_i_index].value:
             raise TypeError(
                 "Component callable in start tag must match component callable in end tag."
-                )
+            )
     else:
         children_template = Template("")
 
@@ -227,19 +227,18 @@ def interpolate_component(
     )
 
     if not callable(component_callable):
-        raise TypeError('Component callable must be callable.')
+        raise TypeError("Component callable must be callable.")
 
     kwargs = _prep_component_kwargs(
         get_callable_info(component_callable),
         resolve_dynamic_attrs(attrs, template.interpolations),
-        system_kwargs=system_kwargs)
+        system_kwargs=system_kwargs,
+    )
 
-    result_template, context_values = invoke_component(
-        component_callable,
-        kwargs)
+    result_template, context_values = invoke_component(component_callable, kwargs)
 
     if isinstance(result_template, Template):
-        if result_template.strings == ('',):
+        if result_template.strings == ("",):
             # DO NOTHING
             return
         result_struct = render_api.transform_api.transform_template(result_template)
@@ -581,13 +580,16 @@ def determine_body_start_s_index(tcomp):
     counts past the dynamic (non-literal) attributes and returns the first strings index
     offset by interpolation index for the component callable itself.
     """
-    return (tcomp.start_i_index
-            + 1
-            + len([1 for attr in tcomp.attrs if not isinstance(attr, TLiteralAttribute)])
-            )
+    return (
+        tcomp.start_i_index
+        + 1
+        + len([1 for attr in tcomp.attrs if not isinstance(attr, TLiteralAttribute)])
+    )
 
 
-def extract_embedded_template(template: Template, body_start_s_index: int, end_i_index: int) -> Template:
+def extract_embedded_template(
+    template: Template, body_start_s_index: int, end_i_index: int
+) -> Template:
     """
     Extract the template parts exclusively from start tag to end tag.
 
