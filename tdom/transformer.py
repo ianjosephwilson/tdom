@@ -144,56 +144,12 @@ type ComponentReturnValue = (
 )
 
 
-def interpolate_component(
-    render_api: RenderService,
-    bf: list[str],
-    last_container_tag: str | None,
-    template: Template,
-    ip_info: InterpolateInfo,
-) -> RenderQueueItem | None:
-    (container_tag, attrs, start_i_index, end_i_index, body_start_s_index) = t.cast(
-        InterpolateComponentInfo, ip_info
-    )
-    if start_i_index != end_i_index and end_i_index is not None:
-        # @DESIGN: We extract the children template from the original outer template.
-        children_template = render_api.transform_api.extract_children_template(
-            template, body_start_s_index, end_i_index
-        )
-    else:
-        children_template = Template("")
-    # @DESIGN: children_struct_t = render_api.transform_api.transform_template(children_template) ?
-    resolved_attrs = render_api.resolve_attrs(attrs, template)
-    start_i = template.interpolations[start_i_index]
-    component_callable = start_i.value
-    if (
-        start_i_index != end_i_index
-        and end_i_index is not None
-        and component_callable != template.interpolations[end_i_index].value
-    ):
-        raise TypeError(
-            "Component callable in start tag must match component callable in end tag."
-        )
-
-    # @DESIGN: Inject system vars via manager?
-    system_dict = render_api.get_system(
-        children=children_template  # @DESIGN: children_struct=children_struct_t ?
-    )
-    # @DESIGN: Determine return signature from callable info (cached inspection) ?
-    callable_info = get_callable_info(component_callable)
-    kwargs = _prep_component_kwargs(callable_info, resolved_attrs, system=system_dict)
-
-    # @DESIGN: We can try to wrap this type resolution up but it is
-    # hard to tell component authors what should be returned if we have this
-    # union, and this is actually the simplified one without iterable, bool or
-    # Node.
-
-    # Component() ->
-    # None | Template | tuple[None | Template, dict[str, object]] |
-    # Callable[[], None | Template | tuple[None | Template, dict[str, object]]]
-
+def invoke_component(
+    component_callable: Callable[..., ComponentReturnValue] | Callable[..., Callable[[], ComponentReturnValue]],
+    kwargs: dict[str, object],
+) -> tuple[ComponentReturnValueSimple, ComponentReturnConfig]:
+    # @DESIGN: Can we just solve this before calling in here?  
     if inspect.isclass(component_callable):
-        # Class components are built and returned and then need to be called
-        # to get their template.
         res = t.cast(ComponentReturnValue, component_callable(**kwargs)())
     else:
         res = t.cast(ComponentReturnValue, component_callable(**kwargs))
@@ -238,7 +194,54 @@ def interpolate_component(
         result_template = res
         context_values = ()
 
+    return result_template, context_values
+
+
+def interpolate_component(
+    render_api: RenderService,
+    bf: list[str],
+    last_container_tag: str | None,
+    template: Template,
+    ip_info: InterpolateInfo,
+) -> RenderQueueItem | None:
+    (container_tag, attrs, start_i_index, end_i_index, body_start_s_index) = t.cast(
+        InterpolateComponentInfo, ip_info
+    )
+    start_i = template.interpolations[start_i_index]
+    component_callable = start_i.value
+    if start_i_index != end_i_index and end_i_index is not None:
+        # @DESIGN: We extract the children template from the original outer template.
+        children_template = extract_embedded_template(
+            template, body_start_s_index, end_i_index
+        )
+        if component_callable != template.interpolations[end_i_index].value:
+            raise TypeError(
+                "Component callable in start tag must match component callable in end tag."
+                )
+    else:
+        children_template = Template("")
+
+    # @DESIGN: Inject system vars via manager?
+    system_kwargs = render_api.get_system(
+        children=children_template  # @DESIGN: children_struct=children_struct_t ?
+    )
+
+    if not callable(component_callable):
+        raise TypeError('Component callable must be callable.')
+
+    kwargs = _prep_component_kwargs(
+        get_callable_info(component_callable),
+        resolve_dynamic_attrs(attrs, template.interpolations),
+        system_kwargs=system_kwargs)
+
+    result_template, context_values = invoke_component(
+        component_callable,
+        kwargs)
+
     if isinstance(result_template, Template):
+        if result_template.strings == ('',):
+            # DO NOTHING
+            return
         result_struct = render_api.transform_api.transform_template(result_template)
         if context_values:
             walker = render_api.walk_template_with_context(
@@ -248,7 +251,8 @@ def interpolate_component(
             walker = render_api.walk_template(bf, result_template, result_struct)
         return (container_tag, iter(walker))
     elif result_template is None:
-        pass
+        # DO NOTHING
+        return
     else:
         raise ValueError(f"Unknown component return value: {type(result_template)}")
 
@@ -568,45 +572,59 @@ class TransformService:
                 return True
         return False
 
-    def extract_children_template(
-        self, template: Template, body_start_s_index: int, end_i_index: int
-    ) -> Template:
-        """
-        Extract the template parts exclusively from start tag to end tag.
 
-        Note that interpolations INSIDE the start tag make this more complex
-        than just "the `s_index` after the component callable's `i_index`".
+def determine_body_start_s_index(tcomp):
+    """
+    Calculate the strings index when the embedded template starts after a component start tag.
 
-        Example:
-        ```python
-        template = (
-            t'<{comp} attr={attr}>'
-                t'<div>{content} <span>{footer}</span></div>'
-            t'</{comp}>'
-        )
-        assert self.extract_children_template(template, 2, 4) == (
+    This doesn't actually know or care if the component has a body it just
+    counts past the dynamic (non-literal) attributes and returns the first strings index
+    offset by interpolation index for the component callable itself.
+    """
+    return (tcomp.start_i_index
+            + 1
+            + len([1 for attr in tcomp.attrs if not isinstance(attr, TLiteralAttribute)])
+            )
+
+
+def extract_embedded_template(template: Template, body_start_s_index: int, end_i_index: int) -> Template:
+    """
+    Extract the template parts exclusively from start tag to end tag.
+
+    Note that interpolations INSIDE the start tag make this more complex
+    than just "the `s_index` after the component callable's `i_index`".
+
+    Example:
+    ```python
+    template = (
+        t'<{comp} attr={attr}>'
             t'<div>{content} <span>{footer}</span></div>'
-        )
-        starttag = t'<{comp} attr={attr}>'
-        endtag = t'</{comp}>'
-        assert template == starttag + self.extract_children_template(template, 2, 4) + endtag
-        ```
-        @DESIGN: "There must be a better way."
-        """
-        # Copy the parts out of the containing template.
-        index = body_start_s_index
-        last_s_index = end_i_index
-        parts = []
-        while index <= last_s_index:
-            parts.append(template.strings[index])
-            if index != last_s_index:
-                parts.append(template.interpolations[index])
-            index += 1
-        # Now trim the first part to the end of the opening tag.
-        parts[0] = parts[0][parts[0].find(">") + 1 :]
-        # Now trim the last part (could also be the first) to the start of the closing tag.
-        parts[-1] = parts[-1][: parts[-1].rfind("<")]
-        return Template(*parts)
+        t'</{comp}>'
+    )
+    assert extract_children_template(template, 2, 4) == (
+        t'<div>{content} <span>{footer}</span></div>'
+    )
+    starttag = t'<{comp} attr={attr}>'
+    endtag = t'</{comp}>'
+    assert template == starttag + extract_children_template(template, 2, 4) + endtag
+    ```
+    @DESIGN: "There must be a better way."
+    """
+    # Copy the parts out of the containing template.
+    index = body_start_s_index
+    last_s_index = end_i_index
+    parts = []
+    while index <= last_s_index:
+        parts.append(template.strings[index])
+        if index != last_s_index:
+            parts.append(template.interpolations[index])
+        index += 1
+    # Now trim the first part to the end of the opening tag.
+    parts[0] = parts[0][parts[0].find(">") + 1 :]
+    # Now trim the last part (could also be the first) to the start of the closing tag.
+    parts[-1] = parts[-1][: parts[-1].rfind("<")]
+    return Template(*parts)
+
 
 
 @dataclass(frozen=True)
