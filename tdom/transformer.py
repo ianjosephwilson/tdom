@@ -145,9 +145,9 @@ type ComponentReturnValue = (
 
 
 def invoke_component(
-    component_callable: Callable[..., ComponentReturnValue] | Callable[..., Callable[[], ComponentReturnValue]],
+    component_callable: Callable, #@TODO: Callable[..., ComponentReturnValue] | Callable[..., Callable[[], ComponentReturnValue]],
     kwargs: dict[str, object],
-) -> tuple[ComponentReturnValueSimple, ComponentReturnConfig]:
+) -> tuple[ComponentReturnValueSimple, tuple[tuple[ContextVar, object], ...]]:
     # @DESIGN: Can we just solve this before calling in here?  
     if inspect.isclass(component_callable):
         res = t.cast(ComponentReturnValue, component_callable(**kwargs)())
