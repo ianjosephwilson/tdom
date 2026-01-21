@@ -440,7 +440,7 @@ def _kebab_to_snake(name: str) -> str:
 def _prep_component_kwargs(
     callable_info: CallableInfo,
     attrs: AttributesDict,
-    system: dict[str, object],
+    system_kwargs: dict[str, object],
     kebab_to_snake: Callable[[str], str] = _kebab_to_snake,
 ):
     if callable_info.requires_positional:
@@ -456,7 +456,7 @@ def _prep_component_kwargs(
         if snake_name in callable_info.named_params or callable_info.kwargs:
             kwargs[snake_name] = attr_value
 
-    for attr_name, attr_value in system.items():
+    for attr_name, attr_value in system_kwargs.items():
         if attr_name in callable_info.named_params or callable_info.kwargs:
             kwargs[attr_name] = attr_value
 
@@ -511,7 +511,7 @@ def _invoke_component(
     callable_info = get_callable_info(value)
 
     kwargs = _prep_component_kwargs(
-        callable_info, attrs, system={"children": tuple(children)}
+        callable_info, attrs, system_kwargs={"children": tuple(children)}
     )
 
     result = value(**kwargs)
