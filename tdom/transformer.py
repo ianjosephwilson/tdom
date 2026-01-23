@@ -112,9 +112,7 @@ def interpolate_comment(
     assert container_tag == "<!--"
     bf.append(
         render_api.escape_html_comment(
-            resolve_text_without_recursion(
-                template, container_tag, comment_t
-            )
+            resolve_text_without_recursion(template, container_tag, comment_t)
         )
     )
 
@@ -270,9 +268,7 @@ def interpolate_raw_text(
     bf.append(
         render_api.escape_html_content_in_tag(
             container_tag,
-            resolve_text_without_recursion(
-                template, container_tag, content_t
-            ),
+            resolve_text_without_recursion(template, container_tag, content_t),
         )
     )
 
@@ -290,9 +286,7 @@ def interpolate_escapable_raw_text(
     container_tag, content_t = t.cast(InterpolateEscapableRawTextInfo, ip_info)
     bf.append(
         render_api.escape_html_text(
-            resolve_text_without_recursion(
-                template, container_tag, content_t
-            )
+            resolve_text_without_recursion(template, container_tag, content_t)
         )
     )
 
@@ -591,7 +585,9 @@ def resolve_text_without_recursion(
         value = template.interpolations[i_index].value
         if value is None:
             return None
-        elif type(value) == str: #type() check to avoid subclasses, probably something smarter here
+        elif (
+            type(value) is str
+        ):  # type() check to avoid subclasses, probably something smarter here
             return value
         elif hasattr(value, "__html__"):
             return Markup(value.__html__())
@@ -611,7 +607,9 @@ def resolve_text_without_recursion(
             value = template.interpolations[part.value].value
             if value is None:
                 continue
-            elif type(value) == str: #type() check to avoid subclasses, probably something smarter here
+            elif (
+                type(value) is str
+            ):  # type() check to avoid subclasses, probably something smarter here
                 if value:
                     text.append(value)
             elif not isinstance(value, str) and isinstance(value, (Template, Iterable)):
