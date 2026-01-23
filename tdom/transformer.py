@@ -112,7 +112,7 @@ def interpolate_comment(
     assert container_tag == "<!--"
     bf.append(
         render_api.escape_html_comment(
-            render_api.resolve_text_without_recursion(
+            resolve_text_without_recursion(
                 template, container_tag, comment_t
             )
         )
@@ -270,7 +270,7 @@ def interpolate_raw_text(
     bf.append(
         render_api.escape_html_content_in_tag(
             container_tag,
-            render_api.resolve_text_without_recursion(
+            resolve_text_without_recursion(
                 template, container_tag, content_t
             ),
         )
@@ -290,7 +290,7 @@ def interpolate_escapable_raw_text(
     container_tag, content_t = t.cast(InterpolateEscapableRawTextInfo, ip_info)
     bf.append(
         render_api.escape_html_text(
-            render_api.resolve_text_without_recursion(
+            resolve_text_without_recursion(
                 template, container_tag, content_t
             )
         )
@@ -572,6 +572,66 @@ class TransformService:
         return False
 
 
+def resolve_text_without_recursion(
+    template: Template, container_tag: str, content_t: Template
+) -> str | None:
+    """
+    Resolve the text in the given template without recursing into more structured text.
+
+    This can be bypassed by interpolating an exact match with an object with `__html__()`.
+
+    A non-exact match is not allowed because we cannot process escaping
+    across the boundary between other content and the pass-through content.
+    """
+    # @TODO: We should use formatting but not in a way that
+    # auto-interpolates structured values.
+
+    if len(content_t.interpolations) == 1 and content_t.strings == ("", ""):
+        i_index = t.cast(int, content_t.interpolations[0].value)
+        value = template.interpolations[i_index].value
+        if value is None:
+            return None
+        elif type(value) == str: #type() check to avoid subclasses, probably something smarter here
+            return value
+        elif hasattr(value, "__html__"):
+            return Markup(value.__html__())
+        elif not isinstance(value, str) and isinstance(value, (Template, Iterable)):
+            raise ValueError(
+                f"Recursive includes are not supported within {container_tag}"
+            )
+        else:
+            return str(value)
+    else:
+        text = []
+        for part in content_t:
+            if isinstance(part, str):
+                if part:
+                    text.append(part)
+                continue
+            value = template.interpolations[part.value].value
+            if value is None:
+                continue
+            elif type(value) == str: #type() check to avoid subclasses, probably something smarter here
+                if value:
+                    text.append(value)
+            elif not isinstance(value, str) and isinstance(value, (Template, Iterable)):
+                raise ValueError(
+                    f"Recursive includes are not supported within {container_tag}"
+                )
+            elif hasattr(value, "__html__"):
+                raise ValueError(
+                    f"Non-exact trusted interpolations are not supported within {container_tag}"
+                )
+            else:
+                value_str = str(value)
+                if value_str:
+                    text.append(value_str)
+        if text:
+            return "".join(text)
+        else:
+            return None
+
+
 def determine_body_start_s_index(tcomp):
     """
     Calculate the strings index when the embedded template starts after a component start tag.
@@ -683,59 +743,6 @@ class RenderService:
                     q.append(render_queue_item)
                     break
         return "".join(bf)
-
-    def resolve_text_without_recursion(
-        self, template: Template, container_tag: str, content_t: Template
-    ) -> str:
-        """
-        Resolve the text in the given template without recursing into more structured text.
-
-        This can be bypassed by interpolating an exact match with an object with `__html__()`.
-
-        A non-exact match is not allowed because we cannot process escaping
-        across the boundary between other content and the pass-through content.
-        """
-        if len(content_t.interpolations) == 1 and content_t.strings == ("", ""):
-            i_index = t.cast(int, content_t.interpolations[0].value)
-            value = template.interpolations[i_index].value
-            if value is None or value is False:
-                return ""
-            elif isinstance(value, str):
-                return value
-            elif hasattr(value, "__html__"):
-                return Markup(value.__html__())
-            elif isinstance(value, (Template, Iterable)):
-                raise ValueError(
-                    f"Recursive includes are not supported within {container_tag}"
-                )
-            else:
-                return str(value)
-        else:
-            text = []
-            for part in content_t:
-                if isinstance(part, str):
-                    if part:
-                        text.append(part)
-                    continue
-                value = template.interpolations[part.value].value
-                if value is None or value is False:
-                    continue
-                elif isinstance(value, str):
-                    if value:
-                        text.append(value)
-                elif isinstance(value, (Template, Iterable)):
-                    raise ValueError(
-                        f"Recursive includes are not supported within {container_tag}"
-                    )
-                elif hasattr(value, "__html__"):
-                    raise ValueError(
-                        f"Non-exact trusted interpolations are not supported within {container_tag}"
-                    )
-                else:
-                    value_str = str(value)
-                    if value_str:
-                        text.append(value_str)
-            return "".join(text)
 
     def resolve_attrs(
         self, attrs: t.Sequence[TAttribute], template: Template
