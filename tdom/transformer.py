@@ -405,6 +405,7 @@ class TransformService:
     escape_html_text: Callable = default_escape_html_text
 
     slash_void: bool = False  # Apply a xhtml-style slash to void html elements.
+    uppercase_doctype: bool = False  # DOCTYPE vs doctype
 
     def transform_template(self, template: Template) -> Template:
         """Transform the given template into a template for rendering."""
@@ -486,7 +487,10 @@ class TransformService:
                 case EndTag(end_tag):
                     yield end_tag
                 case TDocumentType(text):
-                    yield f"<!doctype {text}>"
+                    if self.uppercase_doctype:
+                        yield f"<!DOCTYPE {text}>"
+                    else:
+                        yield f"<!doctype {text}>"
                 case TComment(ref):
                     text_t = Template(
                         *[
@@ -807,12 +811,12 @@ class ContextVarSetter:
             var_value[0].reset(self.tokens[idx])
 
 
-def render_service_factory():
-    return RenderService(transform_api=TransformService())
+def render_service_factory(transform_api_kwargs=None):
+    return RenderService(transform_api=TransformService(**(transform_api_kwargs or {})))
 
 
-def cached_render_service_factory():
-    return RenderService(transform_api=CachedTransformService())
+def cached_render_service_factory(transform_api_kwargs=None):
+    return RenderService(transform_api=CachedTransformService(**(transform_api_kwargs or {})))
 
 
 #
