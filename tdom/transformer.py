@@ -816,7 +816,9 @@ def render_service_factory(transform_api_kwargs=None):
 
 
 def cached_render_service_factory(transform_api_kwargs=None):
-    return RenderService(transform_api=CachedTransformService(**(transform_api_kwargs or {})))
+    return RenderService(
+        transform_api=CachedTransformService(**(transform_api_kwargs or {}))
+    )
 
 
 #
