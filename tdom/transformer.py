@@ -133,7 +133,6 @@ def interpolate_attrs(
     bf.append(attrs_str)
 
 
-type InterpolateComponentInfo = tuple[str, Sequence[TAttribute], int, int | None, int]
 type ComponentReturnValueSimple = None | Template
 type ComponentReturnConfig = dict[str, object]
 type ComponentReturnValue = (
@@ -142,16 +141,29 @@ type ComponentReturnValue = (
 )
 
 
-def invoke_component(
-    component_callable: Callable,  # @TODO: Callable[..., ComponentReturnValue] | Callable[..., Callable[[], ComponentReturnValue]],
+type ComponentClassSig = Callable[..., Callable[[], ComponentReturnValue]]
+
+
+def invoke_component_class(
+    component_callable: ComponentClassSig,
     kwargs: dict[str, object],
 ) -> tuple[ComponentReturnValueSimple, tuple[tuple[ContextVar, object], ...]]:
-    # @DESIGN: Can we just solve this before calling in here?
-    if inspect.isclass(component_callable):
-        res = t.cast(ComponentReturnValue, component_callable(**kwargs)())
-    else:
-        res = t.cast(ComponentReturnValue, component_callable(**kwargs))
+    return process_component_return_value(component_callable(**kwargs)())
 
+
+type ComponentFunctionSig = Callable[..., ComponentReturnValue]
+
+
+def invoke_component_function(
+    component_callable: ComponentFunctionSig,
+    kwargs: dict[str, object],
+) -> tuple[ComponentReturnValueSimple, tuple[tuple[ContextVar, object], ...]]:
+    return process_component_return_value(component_callable(**kwargs))
+
+
+def process_component_return_value(
+    res: ComponentReturnValue,
+) -> tuple[ComponentReturnValueSimple, tuple[tuple[ContextVar, object], ...]]:
     # @DESIGN: Determine return signature via runtime inspection?
     if isinstance(res, tuple):
         if len(res) != 2:
@@ -195,6 +207,9 @@ def invoke_component(
     return result_template, context_values
 
 
+type InterpolateComponentInfo = tuple[str, Sequence[TAttribute], int, int | None, int]
+
+
 def interpolate_component(
     render_api: RenderService,
     bf: list[str],
@@ -233,7 +248,16 @@ def interpolate_component(
         system_kwargs=system_kwargs,
     )
 
-    result_template, context_values = invoke_component(component_callable, kwargs)
+    if inspect.isclass(component_callable):
+        component_callable = t.cast(ComponentClassSig, component_callable)
+        result_template, context_values = invoke_component_class(
+            component_callable, kwargs
+        )
+    else:
+        component_callable = t.cast(ComponentFunctionSig, component_callable)
+        result_template, context_values = invoke_component_function(
+            component_callable, kwargs
+        )
 
     if isinstance(result_template, Template):
         if result_template.strings == ("",):
@@ -688,7 +712,6 @@ def extract_embedded_template(
     # Now trim the last part (could also be the first) to the start of the closing tag.
     parts[-1] = parts[-1][: parts[-1].rfind("<")]
     return Template(*parts)
-
 
 
 @dataclass(frozen=True)
