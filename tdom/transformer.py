@@ -440,7 +440,19 @@ def walk_dynamic_template(
     bf: list[str], template: Template, text_t: Template, container_tag: str
 ) -> t.Iterable[tuple[InterpolatorProto, Template, InterpolateInfo]]:
     """
-    Walk a text template when we determine we can at runtime.
+    Walk a `Text()` template that we determined was usable at runtime.
+
+    This happens when a container tag isn't resolvable at parse time and we
+    have to discover it at runtime.
+
+    bf:
+      The buffer to write strings out to.
+    template:
+      The original values template.
+    text_t:
+      A template with i_index references to the original values template.
+    container_tag:
+      The tag of the containing element.
     """
     for part in text_t:
         if isinstance(part, str):
