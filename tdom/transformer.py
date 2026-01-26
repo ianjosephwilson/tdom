@@ -368,8 +368,7 @@ def interpolate_normal_text_from_value(
         container_tag = last_container_tag
 
     if isinstance(value, str):
-        # @NOTE: Must be subclass of str, if you want __html__ to work you need
-        # to wrap that object in markupsafe.Markup.
+        # @DESIGN: Objects with `__html__` must be wrapped with markupsafe.Markup.
         bf.append(render_api.escape_html_text(value))
     elif isinstance(value, Template):
         return (
@@ -381,8 +380,6 @@ def interpolate_normal_text_from_value(
             ),
         )
     elif isinstance(value, Iterable):
-        # If we don't guard against str instances then str subclasses will be
-        # treated as a sequence/iterable of chars.
         return (
             container_tag,
             (
