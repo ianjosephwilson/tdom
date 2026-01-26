@@ -128,54 +128,62 @@ def test_render_template_repeated():
             )
 
 
-def test_render_template_iterables():
-    render_api = render_service_factory()
+def get_select_t_with_list(options, selected_values):
+    return t"""<select>{
+        [
+            t"<option value={opt[0]} selected={opt[0] in selected_values}>{opt[1]}</option>"
+            for opt in options
+        ]
+    }</select>"""
 
-    def get_select_t_with_list(options, selected_values):
-        return t"""<select>{
-            [
-                t"<option value={opt[0]} selected={opt[0] in selected_values}>{opt[1]}</option>"
-                for opt in options
-            ]
-        }</select>"""
 
-    def get_select_t_with_generator(options, selected_values):
-        return t"""<select>{
-            (
-                t"<option value={opt[0]} selected={opt[0] in selected_values}>{opt[1]}</option>"
-                for opt in options
-            )
-        }</select>"""
-
-    def get_select_t_with_concat(options, selected_values):
-        parts = [t"<select>"]
-        parts.extend(
-            [
-                t"<option value={opt[0]} selected={opt[0] in selected_values}>{opt[1]}</option>"
-                for opt in options
-            ]
+def get_select_t_with_generator(options, selected_values):
+    return t"""<select>{
+        (
+            t"<option value={opt[0]} selected={opt[0] in selected_values}>{opt[1]}</option>"
+            for opt in options
         )
-        parts.append(t"</select>")
-        return sum(parts, t"")
+    }</select>"""
+
+
+def get_select_t_with_concat(options, selected_values):
+    parts = [t"<select>"]
+    parts.extend(
+        [
+            t"<option value={opt[0]} selected={opt[0] in selected_values}>{opt[1]}</option>"
+            for opt in options
+        ]
+    )
+    parts.append(t"</select>")
+    return sum(parts, t"")
+
+
+@pytest.mark.parametrize(
+    "provider",
+    (
+        get_select_t_with_list,
+        get_select_t_with_generator,
+        get_select_t_with_concat,
+    ),
+)
+def test_render_template_iterables(provider):
+    render_api = render_service_factory()
 
     def get_color_select_t(selected_values: set, provider: t.Callable) -> Template:
         PRIMARY_COLORS = [("R", "Red"), ("Y", "Yellow"), ("B", "Blue")]
         assert set(selected_values).issubset(set([opt[0] for opt in PRIMARY_COLORS]))
         return provider(PRIMARY_COLORS, selected_values)
 
-    for provider in (
-        get_select_t_with_list,
-        get_select_t_with_generator,
-        get_select_t_with_concat,
-    ):
-        assert (
-            render_api.render_template(get_color_select_t(set(), provider))
-            == '<select><option value="R">Red</option><option value="Y">Yellow</option><option value="B">Blue</option></select>'
-        )
-        assert (
-            render_api.render_template(get_color_select_t({"Y"}, provider))
-            == '<select><option value="R">Red</option><option value="Y" selected>Yellow</option><option value="B">Blue</option></select>'
-        )
+    no_selection_t = get_color_select_t(set(), provider)
+    assert (
+        render_api.render_template(no_selection_t)
+        == '<select><option value="R">Red</option><option value="Y">Yellow</option><option value="B">Blue</option></select>'
+    )
+    selected_yellow_t = get_color_select_t({"Y"}, provider)
+    assert (
+        render_api.render_template(selected_yellow_t)
+        == '<select><option value="R">Red</option><option value="Y" selected>Yellow</option><option value="B">Blue</option></select>'
+    )
 
 
 def test_context_provider_pattern():
