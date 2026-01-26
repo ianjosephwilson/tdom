@@ -88,16 +88,3 @@ def escape_html_script(text: str, allow_markup: bool = False) -> str:
     for match_re, replace_text in SCRIPT_RES:
         text = re.sub(match_re, replace_text, text)
     return text
-
-
-def escape_html_content_in_tag(parent_tag, content):
-    parent_tag = parent_tag.lower()
-    if parent_tag == "script":
-        return escape_html_script(content)
-    elif parent_tag == "<!--":
-        return escape_html_comment(content)
-    elif parent_tag == "style":
-        return escape_html_style(content)
-    else:
-        # Fallback to nuclear solution.
-        return escape_html_text(content)
