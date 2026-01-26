@@ -6,8 +6,9 @@ import typing as t
 from contextlib import nullcontext
 from contextvars import ContextVar, Token
 import functools
-from markupsafe import Markup
 import inspect
+
+from markupsafe import Markup
 
 from .format import format_interpolation
 from .parser import TemplateParser, HTMLAttributesDict
@@ -76,16 +77,14 @@ class InterpolatorProto(t.Protocol):
         ip_info: InterpolateInfo,
     ) -> RenderQueueItem | None:
         """
-        Populates an interpolation or returns iterator to decende into.
-
-        If recursion is required then pushes current iterator.
+        Populates an interpolation or returns iterator to descend into.
 
         render_api
-            The current render api, provides various helper methods to the interpolator.
+            The current render api, provides various helper methods.
         bf
             A list-like output buffer.
         last_container_tag
-            The last HTML tag known for this interpolation, this cannot always be 100% accurate.
+            The last HTML tag known for this interpolation or None if unknown.
         template
             The "values" template that is being used to fulfill interpolations.
         ip_info
@@ -473,6 +472,7 @@ class TransformService:
     escape_html_text: Callable = default_escape_html_text
 
     slash_void: bool = False  # Apply a xhtml-style slash to void html elements.
+
     uppercase_doctype: bool = False  # DOCTYPE vs doctype
 
     def transform_template(self, template: Template) -> Template:
@@ -658,6 +658,12 @@ class TransformService:
                     raise ValueError(f"Unrecognized tnode: {tnode}")
 
     def has_dynamic_attrs(self, attrs: t.Sequence[TAttribute]) -> bool:
+        """
+        Determine if any attributes with interpolations are in attrs sequence.
+
+        This is mainly used to tell if we can pre-emptively serialize an
+        element's attributes (or not).
+        """
         for attr in attrs:
             if not isinstance(attr, TLiteralAttribute):
                 return True
