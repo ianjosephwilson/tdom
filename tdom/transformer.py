@@ -36,7 +36,6 @@ from .utils import CachableTemplate
 from .processor import (
     _resolve_t_attrs as resolve_dynamic_attrs,
     _resolve_html_attrs as coerce_to_html_attrs,
-    HasHTMLDunder,
     AttributesDict,
     _prep_component_kwargs,
 )
