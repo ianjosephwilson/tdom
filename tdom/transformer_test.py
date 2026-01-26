@@ -402,3 +402,72 @@ def test_class_component():
         res
         == '<div class="footer"><div class="cb tc w-100"><a href="/pages?page=1" class="dib pa1">1</a><a href="/pages?page=2" class="dib pa1">2</a><span class="dib pa1">3</span><a href="/pages?page=4" class="dib pa1">4</a><a href="/pages?page=5" class="dib pa1">5</a><a href="/pages?page=6" class="dib pa1">Next</a></div></div>'
     )
+
+
+def test_mathml():
+    num = 1
+    denom = 3
+    mathml_t = t"""<p>
+  The fraction
+  <math>
+    <mfrac>
+      <mn>{num}</mn>
+      <mn>{denom}</mn>
+    </mfrac>
+  </math>
+  is not a decimal number.
+</p>"""
+    render_api = render_service_factory()
+    res = render_api.render_template(mathml_t)
+    assert (
+        str(res)
+        == """<p>
+  The fraction
+  <math>
+    <mfrac>
+      <mn>1</mn>
+      <mn>3</mn>
+    </mfrac>
+  </math>
+  is not a decimal number.
+</p>"""
+    )
+
+
+def test_svg():
+    cx, cy, r, fill = 150, 100, 80, "green"
+    svg_t = t"""<svg version="1.1" width="300" height="200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="red" />
+  <circle cx={cx} cy={cy} r={r} fill={fill} />
+  <text x="150" y="125" font-size="60" text-anchor="middle" fill="white">SVG</text>
+</svg>"""
+    render_api = render_service_factory()
+    res = render_api.render_template(svg_t)
+    assert (
+        str(res)
+        == """<svg version="1.1" width="300" height="200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="red"></rect>
+  <circle cx="150" cy="100" r="80" fill="green"></circle>
+  <text x="150" y="125" font-size="60" text-anchor="middle" fill="white">SVG</text>
+</svg>"""
+    )
+
+
+@pytest.mark.skip("""Need foreign element mode.  Could work like last container.""")
+def test_svg_self_closing_empty_elements():
+    cx, cy, r, fill = 150, 100, 80, "green"
+    svg_t = t"""<svg width="300" height="200">
+  <rect width="100%" height="100%" fill="red" />
+  <circle cx={cx} cy={cy} r={r} fill={fill} />
+  <text x="150" y="125" font-size="60" text-anchor="middle" fill="white">SVG</text>
+</svg>"""
+    render_api = render_service_factory()
+    res = render_api.render_template(svg_t)
+    assert (
+        str(res)
+        == """<svg width="300" height="200">
+  <rect width="100%" height="100%" fill="red" />
+  <circle cx="150" cy="100" r="80" fill="green" />
+  <text x="150" y="125" font-size="60" text-anchor="middle" fill="white">SVG</text>
+</svg>"""
+    )
