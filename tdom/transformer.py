@@ -8,8 +8,6 @@ from contextvars import ContextVar, Token
 import functools
 import inspect
 
-from markupsafe import Markup
-
 from .format import format_interpolation
 from .parser import TemplateParser, HTMLAttributesDict
 from .tnodes import (
@@ -29,7 +27,8 @@ from .nodes import (
     RCDATA_CONTENT_ELEMENTS,
 )
 from .escaping import (
-    escape_html_content_in_tag as default_escape_html_content_in_tag,
+    escape_html_script as default_escape_html_script,
+    escape_html_style as default_escape_html_style,
     escape_html_text as default_escape_html_text,
     escape_html_comment as default_escape_html_comment,
 )
@@ -110,7 +109,8 @@ def interpolate_comment(
     assert container_tag == "<!--"
     bf.append(
         render_api.escape_html_comment(
-            resolve_text_without_recursion(template, container_tag, comment_t)
+            resolve_text_without_recursion(template, container_tag, comment_t),
+            allow_markup=True,
         )
     )
 
@@ -292,12 +292,25 @@ def interpolate_raw_texts_from_template(
     @NOTE: This interpolator expects a Template.
     """
     container_tag, content_t = t.cast(InterpolateRawTextsFromTemplateInfo, ip_info)
-    bf.append(
-        render_api.escape_html_content_in_tag(
-            container_tag,
-            resolve_text_without_recursion(template, container_tag, content_t),
+    content = resolve_text_without_recursion(template, container_tag, content_t)
+    if container_tag == "script":
+        bf.append(
+            render_api.escape_html_script(
+                container_tag,
+                content,
+                allow_markup=True,
+            )
         )
-    )
+    elif container_tag == "style":
+        bf.append(
+            render_api.escape_html_style(
+                container_tag,
+                content,
+                allow_markup=True,
+            )
+        )
+    else:
+        raise NotImplementedError(f"Container tag {container_tag} is not supported.")
 
 
 type InterpolateEscapableRawTextsFromTemplateInfo = tuple[str, Template]
@@ -318,9 +331,11 @@ def interpolate_escapable_raw_texts_from_template(
     container_tag, content_t = t.cast(
         InterpolateEscapableRawTextsFromTemplateInfo, ip_info
     )
+    assert container_tag == "title" or container_tag == "textarea"
     bf.append(
         render_api.escape_html_text(
-            resolve_text_without_recursion(template, container_tag, content_t)
+            resolve_text_without_recursion(template, container_tag, content_t),
+            allow_markup=True,
         )
     )
 
@@ -689,13 +704,10 @@ def resolve_text_without_recursion(
         value = template.interpolations[i_index].value
         if value is None:
             return None
-        elif (
-            type(value) is str
-        ):  # type() check to avoid subclasses, probably something smarter here
+        elif isinstance(value, str):
+            # @DESIGN: Markup() must be used explicitly if you want __html__ supported.
             return value
-        elif hasattr(value, "__html__"):
-            return Markup(value.__html__())
-        elif not isinstance(value, str) and isinstance(value, (Template, Iterable)):
+        elif isinstance(value, (Template, Iterable)):
             raise ValueError(
                 f"Recursive includes are not supported within {container_tag}"
             )
@@ -798,7 +810,9 @@ class RenderService:
 
     escape_html_comment: Callable = default_escape_html_comment
 
-    escape_html_content_in_tag: Callable = default_escape_html_content_in_tag
+    escape_html_script: Callable = default_escape_html_script
+
+    escape_html_style: Callable = default_escape_html_style
 
     def get_system(self, **kwargs: object):
         # @DESIGN: Maybe inject more here?
