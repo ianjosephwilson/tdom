@@ -277,17 +277,22 @@ def interpolate_component(
         raise ValueError(f"Unknown component return value: {type(result_template)}")
 
 
-type InterpolateRawTextInfo = tuple[str, Template]
+type InterpolateRawTextsFromTemplateInfo = tuple[str, Template]
 
 
-def interpolate_raw_text(
+def interpolate_raw_texts_from_template(
     render_api: RenderService,
     bf: list[str],
     last_container_tag: str | None,
     template: Template,
     ip_info: InterpolateInfo,
 ) -> RenderQueueItem | None:
-    container_tag, content_t = t.cast(InterpolateRawTextInfo, ip_info)
+    """
+    Interpolate and join a template of raw texts together and escape them.
+
+    @NOTE: This interpolator expects a Template.
+    """
+    container_tag, content_t = t.cast(InterpolateRawTextsFromTemplateInfo, ip_info)
     bf.append(
         render_api.escape_html_content_in_tag(
             container_tag,
@@ -296,17 +301,24 @@ def interpolate_raw_text(
     )
 
 
-type InterpolateEscapableRawTextInfo = tuple[str, Template]
+type InterpolateEscapableRawTextsFromTemplateInfo = tuple[str, Template]
 
 
-def interpolate_escapable_raw_text(
+def interpolate_escapable_raw_texts_from_template(
     render_api: RenderService,
     bf: list[str],
     last_container_tag: str | None,
     template: Template,
     ip_info: InterpolateInfo,
 ) -> RenderQueueItem | None:
-    container_tag, content_t = t.cast(InterpolateEscapableRawTextInfo, ip_info)
+    """
+    Interpolate and join a template of escapable raw texts together and escape them.
+
+    @NOTE: This interpolator expects a Template.
+    """
+    container_tag, content_t = t.cast(
+        InterpolateEscapableRawTextsFromTemplateInfo, ip_info
+    )
     bf.append(
         render_api.escape_html_text(
             resolve_text_without_recursion(template, container_tag, content_t)
@@ -314,104 +326,128 @@ def interpolate_escapable_raw_text(
     )
 
 
-type InterpolateStructTextInfo = tuple[str, int]
+type InterpolateNormalTextInfo = tuple[str, int]
 
 
-def interpolate_struct_text(
+def interpolate_normal_text_from_interpolation(
     render_api: RenderService,
     bf: list[str],
     last_container_tag: str | None,
     template: Template,
     ip_info: InterpolateInfo,
 ) -> RenderQueueItem | None:
-    container_tag, ip_index = t.cast(InterpolateStructTextInfo, ip_info)
+    """
+    Interpolate a single normal text either into structured content or an escaped string.
+
+    @NOTE: This expects a SINGLE interpolation referenced via i_index.
+    """
+    container_tag, ip_index = t.cast(InterpolateNormalTextInfo, ip_info)
     value = format_interpolation(template.interpolations[ip_index])
-    return interpolate_text(
+    return interpolate_normal_text_from_value(
         render_api, bf, last_container_tag, template, (container_tag, value)
     )
 
 
-# @TODO: can we coerce this to still use typing even if we just str() everything ? -- `| object`
-type UserTextValueItem = None | str | Template | HasHTMLDunder
-# @TODO: See above about `| object`
-type UserTextValue = (
-    UserTextValueItem | Sequence[UserTextValueItem] | t.Iterable[UserTextValueItem]
-)
+type InterpolateNormalTextValueInfo = tuple[str | None, object]
 
 
-def interpolate_user_text(
+def interpolate_normal_text_from_value(
     render_api: RenderService,
     bf: list[str],
     last_container_tag: str | None,
     template: Template,
     ip_info: InterpolateInfo,
 ) -> RenderQueueItem | None:
-    return interpolate_text(render_api, bf, last_container_tag, template, ip_info)
+    """
+    Resolve a single text value interpolated within a normal element.
 
-
-type InterpolateTextInfo = tuple[str, object]
-
-
-def interpolate_text(
-    render_api: RenderService,
-    bf: list[str],
-    last_container_tag: str | None,
-    template: Template,
-    ip_info: InterpolateInfo,
-) -> RenderQueueItem | None:
-    container_tag, value = t.cast(InterpolateTextInfo, ip_info)
+    @NOTE: This could be a str(), None, Iterable, Template or HasHTMLDunder.
+    """
+    container_tag, value = t.cast(InterpolateNormalTextValueInfo, ip_info)
     if container_tag is None:
         container_tag = last_container_tag
 
-    if type(value) is str:  # ONLY native strings, not Markup/__html__, etc.
-        if container_tag not in ("style", "script", "title", "textarea", "<!--"):
-            bf.append(render_api.escape_html_text(value))
-        else:
-            # @TODO: How could this happen?
-            raise ValueError(
-                f"We cannot escape text within {container_tag} when multiple interpolations could occur."
-            )
-            # bf.append(render_api.escape_html_content_in_tag(container_tag, str(value)))
-    else:
-        if isinstance(value, Template):
-            return (
-                container_tag,
-                iter(
-                    render_api.walk_template(
-                        bf, value, render_api.transform_api.transform_template(value)
-                    )
-                ),
-            )
-        elif not isinstance(value, str) and (
-            isinstance(value, t.Sequence) or hasattr(value, "__iter__")
-        ):
-            # If we don't guard against str instances then str subclasses will be
-            # treated as a sequence/iterable of chars.
-            return (
-                container_tag,
+    if isinstance(value, str):
+        # @NOTE: Must be subclass of str, if you want __html__ to work you need
+        # to wrap that object in markupsafe.Markup.
+        bf.append(render_api.escape_html_text(value))
+    elif isinstance(value, Template):
+        return (
+            container_tag,
+            iter(
+                render_api.walk_template(
+                    bf, value, render_api.transform_api.transform_template(value)
+                )
+            ),
+        )
+    elif isinstance(value, Iterable):
+        # If we don't guard against str instances then str subclasses will be
+        # treated as a sequence/iterable of chars.
+        return (
+            container_tag,
+            (
                 (
-                    (
-                        interpolate_user_text,
-                        template,
-                        (container_tag, v if v is not None else None),
-                    )
-                    for v in t.cast(Iterable, value)
-                ),
-            )
-        elif value is None:
-            # @DESIGN: Ignore None.
-            return
+                    interpolate_normal_text_from_value,
+                    template,
+                    (container_tag, v if v is not None else None),
+                )
+                for v in t.cast(Iterable, value)
+            ),
+        )
+    elif value is None:
+        # @DESIGN: Ignore None.
+        return
+    else:
+        # @DESIGN: Everything that isn't an object we recognize is
+        # coerced to a str() and emitted.
+        bf.append(render_api.escape_html_text(str(value)))
+
+
+type InterpolateDynamicTextsFromTemplateInfo = tuple[None, Template]
+
+
+def interpolate_dynamic_texts_from_template(
+    render_api: RenderService,
+    bf: list[str],
+    last_container_tag: str | None,
+    template: Template,
+    ip_info: InterpolateInfo,
+) -> RenderQueueItem | None:
+    container_tag, text_t = t.cast(InterpolateDynamicTextsFromTemplateInfo, ip_info)
+    # Try to use the dynamic container if possible.
+    if container_tag is None:
+        container_tag = last_container_tag
+    if container_tag is None:
+        raise NotImplementedError(
+            "We cannot interpolate texts without knowing what tag they are contained in."
+        )
+    elif container_tag in CDATA_CONTENT_ELEMENTS:
+        return interpolate_raw_texts_from_template(
+            render_api, bf, last_container_tag, template, (container_tag, text_t)
+        )
+    elif container_tag in RCDATA_CONTENT_ELEMENTS:
+        return interpolate_escapable_raw_texts_from_template(
+            render_api, bf, last_container_tag, template, (container_tag, text_t)
+        )
+    else:
+        return (
+            container_tag,
+            iter(walk_dynamic_template(bf, template, text_t, container_tag)),
+        )
+
+
+def walk_dynamic_template(
+    bf: list[str], template: Template, text_t: Template, container_tag: str
+) -> t.Iterable[tuple[InterpolatorProto, Template, InterpolateInfo]]:
+    """
+    Walk a text template when we determine we can at runtime.
+    """
+    for part in text_t:
+        if isinstance(part, str):
+            bf.append(part)
         else:
-            if container_tag not in ("style", "script", "title", "textarea", "<!--"):
-                if hasattr(value, "__html__"):
-                    value = t.cast(HasHTMLDunder, value)
-                    bf.append(value.__html__())
-                else:
-                    # @DESIGN: Everything that isn't an object we recognize is
-                    # coerced to a str() and emitted.
-                    bf.append(render_api.escape_html_text(str(value)))
-            else:
-                raise NotImplementedError("We cannot handle text escaping here.")
+            ip_info = (container_tag, part.value)
+            yield (interpolate_normal_text_from_interpolation, template, ip_info)
 
 
 @dataclass(frozen=True)
@@ -474,27 +510,45 @@ class TransformService:
         )
         return Interpolation((interpolate_component, info), "", None, "tdom_component")
 
-    def _stream_raw_text_interpolation(self, last_container_tag, text_t):
+    def _stream_raw_texts_interpolation(
+        self, last_container_tag: str, text_t: Template
+    ):
         info = (last_container_tag, text_t)
         return Interpolation(
-            (interpolate_raw_text, info), "", None, "html_raw_text_template"
+            (interpolate_raw_texts_from_template, info), "", None, "html_raw_texts"
         )
 
-    def _stream_escapable_raw_text_interpolation(self, last_container_tag, text_t):
+    def _stream_escapable_raw_texts_interpolation(
+        self, last_container_tag: str, text_t: Template
+    ):
         info = (last_container_tag, text_t)
         return Interpolation(
-            (interpolate_escapable_raw_text, info),
+            (interpolate_escapable_raw_texts_from_template, info),
             "",
             None,
-            "html_escapable_raw_text_template",
+            "html_escapable_raw_texts",
         )
 
-    def _stream_text_interpolation(
-        self, last_container_tag: str | None, values_index: int
+    def _stream_normal_text_interpolation(
+        self, last_container_tag: str, values_index: int
     ):
         info = (last_container_tag, values_index)
         return Interpolation(
-            (interpolate_struct_text, info), "", None, "html_normal_interpolation"
+            (interpolate_normal_text_from_interpolation, info),
+            "",
+            None,
+            "html_normal_text",
+        )
+
+    def _stream_dynamic_texts_interpolation(
+        self, last_container_tag: None, text_t: Template
+    ):
+        info = (last_container_tag, text_t)
+        return Interpolation(
+            (interpolate_dynamic_texts_from_template, info),
+            "",
+            None,
+            "html_dynamic_text",
         )
 
     def streamer(
@@ -563,14 +617,22 @@ class TransformService:
                             for part in iter(ref)
                         ]
                     )
-                    if last_container_tag in CDATA_CONTENT_ELEMENTS:
+                    if ref.is_literal:
+                        yield ref.strings[0]  # Trust literals.
+                    elif last_container_tag is None:
+                        # We can't know how to handle this right now, so wait until render time and if
+                        # we still cannot know then probably fail.
+                        yield self._stream_dynamic_texts_interpolation(
+                            last_container_tag, text_t
+                        )
+                    elif last_container_tag in CDATA_CONTENT_ELEMENTS:
                         # Must be handled all at once.
-                        yield self._stream_raw_text_interpolation(
+                        yield self._stream_raw_texts_interpolation(
                             last_container_tag, text_t
                         )
                     elif last_container_tag in RCDATA_CONTENT_ELEMENTS:
                         # We can handle all at once because there are no non-text children and everything must be string-ified.
-                        yield self._stream_escapable_raw_text_interpolation(
+                        yield self._stream_escapable_raw_texts_interpolation(
                             last_container_tag, text_t
                         )
                     else:
@@ -580,7 +642,7 @@ class TransformService:
                             if isinstance(part, str):
                                 yield part
                             else:
-                                yield self._stream_text_interpolation(
+                                yield self._stream_normal_text_interpolation(
                                     last_container_tag, part.value
                                 )
                 case _:
