@@ -11,6 +11,8 @@ from .transformer import (
     render_service_factory,
     cached_render_service_factory,
     CachedTransformService,
+    RenderService,
+    TransformService,
 )
 
 
@@ -479,3 +481,66 @@ def test_svg_self_closing_empty_elements():
   <text x="150" y="125" font-size="60" text-anchor="middle" fill="white">SVG</text>
 </svg>"""
     )
+
+
+@dataclass
+class FakeUser:
+    name: str
+    id: int
+
+
+@dataclass
+class FakeRequest:
+    user: FakeUser | None = None
+
+
+@dataclass(frozen=True)
+class RequestRenderService(RenderService):
+    request: FakeRequest | None = None
+
+    def get_system(self, **kwargs):
+        return {**kwargs, "request": self.request}
+
+
+class UserProto(t.Protocol):
+    name: str
+
+
+class RequestProto(t.Protocol):
+    user: UserProto | None
+
+
+def test_system_context():
+    """Test providing context to components horizontally via *extra* system provided kwargs."""
+
+    def request_render_api(request):
+        return RequestRenderService(request=request, transform_api=TransformService())
+
+    def UserStatus(request: RequestProto, children: Template | None = None) -> Template:
+        user = request.user
+        if user:
+            classes = ("account-online",)
+            status_t = t"<span>Logged in as {user.name}</span>"
+        else:
+            classes = ("account-offline",)
+            status_t = t"<span>Not logged in</span>"
+        return t"<div class=account class={classes}>{children}{status_t}</div>"
+
+    page_t = t"""<!doctype html><html><body><div class=header><{UserStatus}><span class=account-icon>&#x1F464;</span></{UserStatus}></div></body></html>"""
+    render_api = request_render_api(FakeRequest(user=FakeUser(name="Guido", id=1000)))
+    res = render_api.render_template(page_t)
+    assert (
+        res
+        == """<!doctype html><html><body><div class="header"><div class="account account-online"><span class="account-icon">👤</span><span>Logged in as Guido</span></div></div></body></html>"""
+    )
+    render_api = request_render_api(FakeRequest(user=None))
+    res = render_api.render_template(page_t)
+    assert (
+        res
+        == """<!doctype html><html><body><div class="header"><div class="account account-offline"><span class="account-icon">👤</span><span>Not logged in</span></div></div></body></html>"""
+    )
+
+    render_api = RenderService(transform_api=TransformService())
+    with pytest.raises(TypeError) as excinfo:
+        res = render_api.render_template(page_t)
+    assert "Missing required parameters" in str(excinfo.value)
