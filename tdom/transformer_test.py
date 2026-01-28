@@ -544,3 +544,49 @@ def test_system_context():
     with pytest.raises(TypeError) as excinfo:
         res = render_api.render_template(page_t)
     assert "Missing required parameters" in str(excinfo.value)
+
+
+class ColorSwitch:
+
+    def __init__(self, children: Template, from_color: str, to_color: str):
+        self.from_color = from_color
+        self.to_color = to_color
+        self.children = children
+
+    def __call__(self) -> Template:
+        return self.children
+
+    def after_render(self, bf: list[str], template: Template, struct_t: Template, buf_start_index: int) -> None:
+        from tdom.nodes import Fragment, Element, Text
+        from tdom.parser import TemplateParser
+        from tdom.processor import html
+        # Erase the buffer
+        comp_parts = bf[buf_start_index:]
+        del bf[buf_start_index:]
+        root = html(Template(''.join(comp_parts)))
+        q = [root]
+        while q:
+            el = q.pop()
+            match el:
+                case Element():
+                    for k, v in el.attrs.items():
+                        if k == 'class':
+                            classes = v.split(' ')
+                            if self.from_color in classes:
+                                idx = classes.index(self.from_color)
+                                while self.from_color in classes:
+                                    classes.remove(self.from_color)
+                                classes.insert(idx, self.to_color)
+                                found = True
+                            el.attrs[k] = ' '.join(classes)
+                    q.extend(el.children)
+                case Fragment():
+                    q.extend(el.children)
+        bf.append(str(root))
+
+
+def test_after_render():
+    render_api = render_service_factory()
+    test_t = t'<{ColorSwitch} from_color=red to_color=blue><div><span class="red">Test</span></div></{ColorSwitch}>'
+    res = render_api.render_template(test_t)
+    assert res == '<div><span class="blue">Test</span></div>'

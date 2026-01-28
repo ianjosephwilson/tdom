@@ -143,10 +143,11 @@ type ComponentClassSig = Callable[..., Callable[[], ComponentReturnValue]]
 
 
 def invoke_component_class(
-    component_callable: ComponentClassSig,
+    component_factory: ComponentClassSig,
     kwargs: dict[str, object],
-) -> tuple[ComponentReturnValueSimple, tuple[tuple[ContextVar, object], ...]]:
-    return process_component_return_value(component_callable(**kwargs)())
+) -> tuple[tuple[ComponentReturnValueSimple, tuple[tuple[ContextVar, object], ...]], object]:
+    component_obj = component_factory(**kwargs)
+    return process_component_return_value(component_obj()), component_obj
 
 
 type ComponentFunctionSig = Callable[..., ComponentReturnValue]
@@ -248,7 +249,7 @@ def interpolate_component(
 
     if inspect.isclass(component_callable):
         component_callable = t.cast(ComponentClassSig, component_callable)
-        result_template, context_values = invoke_component_class(
+        (result_template, context_values), component_obj = invoke_component_class(
             component_callable, kwargs
         )
     else:
@@ -256,15 +257,16 @@ def interpolate_component(
         result_template, context_values = invoke_component_function(
             component_callable, kwargs
         )
+        component_obj = None
 
     if isinstance(result_template, Template):
         if result_template.strings == ("",):
             # DO NOTHING
             return
         result_struct = render_api.transform_api.transform_template(result_template)
-        if context_values:
+        if context_values or component_obj:
             walker = render_api.walk_template_with_context(
-                bf, result_template, result_struct, context_values=context_values
+                bf, result_template, result_struct, context_values=context_values, after_render=getattr(component_obj, 'after_render', None) if component_obj else None,
             )
         else:
             walker = render_api.walk_template(bf, result_template, result_struct)
@@ -870,13 +872,18 @@ class RenderService:
         template: Template,
         struct_t: Template,
         context_values: tuple[tuple[ContextVar, object], ...] = (),
+        after_render: Callable[list[str], Template, Template, int] | None = None
     ) -> Iterable[tuple[InterpolatorProto, Template, InterpolateInfo]]:
         if context_values:
             cm = ContextVarSetter(context_values=context_values)
         else:
             cm = nullcontext()
         with cm:
+            buf_start_index = len(bf) - 1
             yield from self.walk_template(bf, template, struct_t)
+            # Potential middleware hook.
+            if after_render:
+                after_render(bf, template, struct_t, buf_start_index)
 
     def walk_template(
         self, bf: list[str], template: Template, struct_t: Template
