@@ -210,8 +210,9 @@ def test_parse_mismatched_tags():
 
 
 def test_parse_unclosed_tag():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as excinfo:
         _ = TemplateParser.parse(t"<div>Unclosed")
+    assert "div" in str(excinfo.value)
 
 
 def test_parse_unexpected_closing_tag():
