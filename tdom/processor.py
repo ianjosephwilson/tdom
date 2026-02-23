@@ -2,7 +2,7 @@ from typing import cast
 from collections.abc import Iterable, Sequence, Callable
 from functools import lru_cache
 from string.templatelib import Template, Interpolation
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from markupsafe import Markup
 
@@ -427,8 +427,10 @@ def serialize_html_attrs(
     )
 
 
-def make_ctx(parent_tag: str | None = None, ns: str | None = "html"):
-    return ProcessContext(parent_tag=parent_tag, ns=ns)
+def make_ctx(parent_tag: str | None = None, ns: str | None = "html", system: dict | None = None):
+    if system is None:
+        system = {}
+    return ProcessContext(parent_tag=parent_tag, ns=ns, system=system)
 
 
 @dataclass(frozen=True, slots=True)
@@ -438,10 +440,13 @@ class ProcessContext:
     # None means unknown not just a missing value.
     ns: str | None = None
 
+    system: dict = field(default_factory=dict)
+
     def copy(
         self,
         ns: NotSet | str | None = NOT_SET,
         parent_tag: NotSet | str | None = NOT_SET,
+        system: NotSet | dict = NOT_SET,
     ):
         if isinstance(ns, NotSet):
             resolved_ns = self.ns
@@ -451,9 +456,14 @@ class ProcessContext:
             resolved_parent_tag = self.parent_tag
         else:
             resolved_parent_tag = parent_tag
+        if isinstance(system, NotSet):
+            resolved_system = self.system
+        else:
+            resolved_system = system
         return make_ctx(
             parent_tag=resolved_parent_tag,
             ns=resolved_ns,
+            system=resolved_system,
         )
 
 
@@ -679,7 +689,7 @@ class ProcessorService(BaseProcessorService):
         kwargs = prep_component_kwargs(
             get_callable_info(component_callable),
             _resolve_t_attrs(attrs, template.interpolations),
-            system_kwargs={"children": children_template},
+            system_kwargs={**last_ctx.system, "children": children_template},
         )
 
         result_t = component_callable(**kwargs)

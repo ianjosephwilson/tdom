@@ -196,7 +196,7 @@ class NodeProcessorService(BaseProcessorService):
         kwargs = prep_component_kwargs(
             get_callable_info(component_callable),
             _resolve_t_attrs(attrs, template.interpolations),
-            system_kwargs={"children": children_template},
+            system_kwargs={**last_ctx.system, "children": children_template},
         )
 
         result_t = component_callable(**kwargs)

@@ -2030,3 +2030,19 @@ def test_svg_self_closing_empty_elements(to_html):
   <text x="150" y="125" font-size="60" text-anchor="middle" fill="white">SVG</text>
 </svg>"""
     )
+
+
+@pytest.mark.parametrize("to_html", PROCESSORS)
+def test_framework_system_kwargs(to_html):
+    from .processor import ProcessContext
+    # Usually a framework would provide some "request context" mechanism,
+    # but for this test we just use a global dictionary.
+    g = {"theme": "default-theme"}
+    def BodyComp(children: Template) -> Template:
+        return t"<body><{ContentComp}>{children}</{ContentComp}></body>"
+    def ContentComp(system_barge: dict, children: Template) -> Template:
+        theme = system_barge["theme"]
+        return t"<div class={theme}>{children}</div>"
+    content = "Test Content"
+    page_t = t"<!doctype html><html><{BodyComp}><span>{content}</span></{BodyComp}></html>"
+    assert to_html(page_t, assume_ctx=ProcessContext(parent_tag=None, ns="html", system={'system_barge': g})) == '<!DOCTYPE html><html><body><div class="default-theme"><span>Test Content</span></div></body></html>'
