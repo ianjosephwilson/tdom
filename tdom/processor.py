@@ -384,6 +384,9 @@ def prep_component_kwargs(
     attrs: AttributesDict,
     system_kwargs: AttributesDict,
 ) -> AttributesDict:
+    """
+    Prepare the keyword arguments for invoking a component.
+    """
     if callable_info.requires_positional:
         raise TypeError(
             "Component callables cannot have required positional arguments."
@@ -550,15 +553,28 @@ class ProcessorService(BaseProcessorService):
                     break
         if bf:
             yield "".join(bf)
-            bf.clear()  # Remove later maybe.
+            bf.clear()
 
     def walk_from_tnode(
         self, bf: list[str], template: Template, assume_ctx: ProcessContext, root: TNode
     ) -> Iterable[WalkerProto]:
         """
-        Walk around tree and try not to get lost.
-        """
+        Process a TNode tree into strings based on the node type.
 
+        Traversal of the tree is implemented by iterating over a queue.
+
+        The traversal is done depth first in pre-order.
+
+        The tree nodes are processed based on the node type.
+
+        During processing non-recursive "results" will be immediately appended
+        to the given buffer `bf`.  Otherwise the recursive "results" will be
+        an Iterable that should be yielded to the caller.  Those iterables should be
+        themselves iterated/processes until exhaustion before returning control.
+
+        The last known process context is passed from a parent to each children
+        and copied on write as needed.
+        """
         q: list[tuple[ProcessContext, TNode | EndTag]] = [(assume_ctx, root)]
         while q:
             last_ctx, tnode = q.pop()
@@ -630,6 +646,9 @@ class ProcessorService(BaseProcessorService):
         last_ctx: ProcessContext,
         content_ref: TemplateRef,
     ) -> None:
+        """
+        Process an HTML comment.
+        """
         content = resolve_text_without_recursion(template, "<!--", content_ref)
         bf.append("<!--")
         if content is None or content == "":
@@ -650,6 +669,9 @@ class ProcessorService(BaseProcessorService):
         last_ctx: ProcessContext,
         attrs: tuple[TAttribute, ...],
     ) -> None:
+        """
+        Process the HTML attributes of a regular element/tag (not a component).
+        """
         resolved_attrs = _resolve_t_attrs(attrs, template.interpolations)
         attrs_str = serialize_html_attrs(_resolve_html_attrs(resolved_attrs))
         if attrs_str:
@@ -664,6 +686,11 @@ class ProcessorService(BaseProcessorService):
         start_i_index: int,
         end_i_index: int | None,
     ) -> None | WalkerProto:
+        """
+        Process a component, ie. a callable in startend tag or duplicated in a start and end tag.
+
+        @TODO: Include invocation rules: component types, attributes, children and result.
+        """
         body_start_s_index = (
             start_i_index
             + 1
@@ -719,6 +746,12 @@ class ProcessorService(BaseProcessorService):
         last_ctx: ProcessContext,
         content_ref: TemplateRef,
     ) -> None:
+        """
+        Process a template as if it is RAW TEXT (special characters cannot be escaped with entities because entities are not decoded when read back).
+
+        The interpolations are restricted here because it does not really make sense to inject a subtree of tags as children.  This restriction
+        means that recursion cannot occur here and all content should be immediately appended to `bf`.
+        """
         assert last_ctx.parent_tag in CDATA_CONTENT_ELEMENTS
         content = resolve_text_without_recursion(
             template, last_ctx.parent_tag, content_ref
@@ -751,6 +784,13 @@ class ProcessorService(BaseProcessorService):
         last_ctx: ProcessContext,
         content_ref: TemplateRef,
     ) -> None:
+        """
+        Process a template as ESCAPABLE RAW TEXT (special characters CAN be escaped with entities because entities ARE decoded when read back).
+
+        The interpolations are restricted here because it does not really make sense to inject a subtree of tags as children.  This restriction
+        means that recursion cannot occur here and all content should be immediately appended to `bf`.
+
+        """
         assert last_ctx.parent_tag in RCDATA_CONTENT_ELEMENTS
         content = resolve_text_without_recursion(
             template, last_ctx.parent_tag, content_ref
@@ -771,6 +811,13 @@ class ProcessorService(BaseProcessorService):
         last_ctx: ProcessContext,
         values_index: int,
     ) -> WalkerProto | None:
+        """
+        Process a template as NORMAL TEXT (this is defined as text that isn't a special case like RAW TEXT / ESCAPABLE RAW TEXT).
+
+        The interpolations are not restricted here and this is the common case.  Therefore recursion can occur here
+        such as when another Template is interpolated to bring in a nested subtree of elements.
+        """
+
         value = format_interpolation(template.interpolations[values_index])
         if isinstance(value, str):
             bf.append(self.escape_html_text(value))
@@ -797,6 +844,12 @@ class ProcessorService(BaseProcessorService):
         last_ctx: ProcessContext,
         value: NormalTextInterpolationValue,
     ) -> WalkerProto | None:
+        """
+        Process a value directly instead of via an interpolation as NORMAL TEXT.
+
+        This is used to handle the situation where an iterable of values is processed instead
+        of a Template of strings and Interpolations (and their values).
+        """
         if isinstance(value, str):
             bf.append(self.escape_html_text(value))
         elif isinstance(value, Template):
