@@ -430,7 +430,9 @@ def serialize_html_attrs(
     )
 
 
-def make_ctx(parent_tag: str | None = None, ns: str | None = "html", system: dict | None = None):
+def make_ctx(
+    parent_tag: str | None = None, ns: str | None = "html", system: dict | None = None
+):
     if system is None:
         system = {}
     return ProcessContext(parent_tag=parent_tag, ns=ns, system=system)
