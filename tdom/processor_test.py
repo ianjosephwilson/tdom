@@ -10,7 +10,6 @@ from markupsafe import escape as markupsafe_escape
 
 from .callables import get_callable_info
 from .escaping import escape_html_text
-from .nodes.processor import to_node
 from .processor import (
     CachedParserService,
     cached_processor_service_factory,
@@ -18,29 +17,12 @@ from .processor import (
     prep_component_kwargs,
     processor_service_factory,
 )
-from .processor import (
-    to_html as to_html_str,
-)
-
-
-def to_node_str(*args, **kwargs):
-    """Proxy to to_node but then strify the result to match non-node processor."""
-    return str(to_node(*args, **kwargs))
-
 
 processor_api = processor_service_factory(slash_void=True, uppercase_doctype=True)
 
 
-def to_html_str_no_cache(*args, **kwargs):
+def html(*args, **kwargs):
     return processor_api.process_template(*args, **kwargs)
-
-
-PROCESSORS = [
-    to_html_str,  # by default this is cached
-    to_node_str,  # by default this is cached
-    to_html_str_no_cache,  # we only test one without a cache for test run speed
-]
-" List of processor functions to test against. "
 
 
 # --------------------------------------------------------------------------
@@ -51,63 +33,59 @@ PROCESSORS = [
 #
 # Text
 #
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestBareTemplate:
-    def test_empty(self, to_html):
-        assert to_html(t"") == ""
+    def test_empty(self):
+        assert html(t"") == ""
 
-    def test_text_literal(self, to_html):
-        assert to_html(t"Hello, world!") == "Hello, world!"
+    def test_text_literal(self):
+        assert html(t"Hello, world!") == "Hello, world!"
 
-    def test_text_singleton(self, to_html):
+    def test_text_singleton(self):
         greeting = "Hello, Alice!"
-        assert to_html(t"{greeting}", make_ctx(parent_tag="div")) == "Hello, Alice!"
-        assert to_html(t"{greeting}", make_ctx(parent_tag="script")) == "Hello, Alice!"
-        assert to_html(t"{greeting}", make_ctx(parent_tag="style")) == "Hello, Alice!"
-        assert (
-            to_html(t"{greeting}", make_ctx(parent_tag="textarea")) == "Hello, Alice!"
-        )
-        assert to_html(t"{greeting}", make_ctx(parent_tag="title")) == "Hello, Alice!"
+        assert html(t"{greeting}", make_ctx(parent_tag="div")) == "Hello, Alice!"
+        assert html(t"{greeting}", make_ctx(parent_tag="script")) == "Hello, Alice!"
+        assert html(t"{greeting}", make_ctx(parent_tag="style")) == "Hello, Alice!"
+        assert html(t"{greeting}", make_ctx(parent_tag="textarea")) == "Hello, Alice!"
+        assert html(t"{greeting}", make_ctx(parent_tag="title")) == "Hello, Alice!"
 
-    def test_text_singleton_without_parent(self, to_html):
+    def test_text_singleton_without_parent(self):
         greeting = "</script>"
         with pytest.raises(NotImplementedError):
             # Explicitly set the parent tag as None.
             ctx = make_ctx(parent_tag=None, ns="html")
-            _ = to_html(t"{greeting}", assume_ctx=ctx)
+            _ = html(t"{greeting}", assume_ctx=ctx)
 
-    def test_text_singleton_explicit_parent_script(self, to_html):
+    def test_text_singleton_explicit_parent_script(self):
         greeting = "</script>"
-        res = to_html(t"{greeting}", assume_ctx=make_ctx(parent_tag="script"))
+        res = html(t"{greeting}", assume_ctx=make_ctx(parent_tag="script"))
         assert res == "\\x3c/script>"
         assert res != "</script>"
 
-    def test_text_singleton_explicit_parent_div(self, to_html):
+    def test_text_singleton_explicit_parent_div(self):
         greeting = "</div>"
-        res = to_html(t"{greeting}", assume_ctx=make_ctx(parent_tag="div"))
+        res = html(t"{greeting}", assume_ctx=make_ctx(parent_tag="div"))
         assert res == "&lt;/div&gt;"
         assert res != "</div>"
 
-    def test_text_template(self, to_html):
+    def test_text_template(self):
         name = "Alice"
         assert (
-            to_html(t"Hello, {name}!", assume_ctx=make_ctx(parent_tag="div"))
+            html(t"Hello, {name}!", assume_ctx=make_ctx(parent_tag="div"))
             == "Hello, Alice!"
         )
 
-    def test_text_template_escaping(self, to_html):
+    def test_text_template_escaping(self):
         name = "Alice & Bob"
         assert (
-            to_html(t"Hello, {name}!", assume_ctx=make_ctx(parent_tag="div"))
+            html(t"Hello, {name}!", assume_ctx=make_ctx(parent_tag="div"))
             == "Hello, Alice &amp; Bob!"
         )
 
-    def test_parse_entities_are_escaped_no_parent_tag(self, to_html):
-        res = to_html(t"&lt;/p&gt;")
+    def test_parse_entities_are_escaped_no_parent_tag(self):
+        res = html(t"&lt;/p&gt;")
         assert res == "&lt;/p&gt;", "Default to standard escaping."
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class LiteralHTML:
     """Text is returned as is by __html__."""
 
@@ -119,208 +97,202 @@ class LiteralHTML:
         return self.text
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestComment:
-    def test_literal(self, to_html):
-        assert to_html(t"<!--This is a comment-->") == "<!--This is a comment-->"
+    def test_literal(self):
+        assert html(t"<!--This is a comment-->") == "<!--This is a comment-->"
 
     #
     # Singleton / Exact Match
     #
-    def test_singleton_str(self, to_html):
+    def test_singleton_str(self):
         text = "This is a comment"
-        assert to_html(t"<!--{text}-->") == "<!--This is a comment-->"
+        assert html(t"<!--{text}-->") == "<!--This is a comment-->"
 
-    def test_singleton_object(self, to_html):
-        assert to_html(t"<!--{0}-->") == "<!--0-->"
+    def test_singleton_object(self):
+        assert html(t"<!--{0}-->") == "<!--0-->"
 
-    def test_singleton_none(self, to_html):
-        assert to_html(t"<!--{None}-->") == "<!---->"
+    def test_singleton_none(self):
+        assert html(t"<!--{None}-->") == "<!---->"
 
-    def test_singleton_has_dunder_html(self, to_html):
+    def test_singleton_has_dunder_html(self):
         content = LiteralHTML("-->")
-        assert to_html(t"<!--{content}-->") == "<!---->-->", (
+        assert html(t"<!--{content}-->") == "<!---->-->", (
             "DO NOT DO THIS! This is just an advanced escape hatch."
         )
 
-    def test_singleton_escaping(self, to_html):
+    def test_singleton_escaping(self):
         text = "-->comment"
-        assert to_html(t"<!--{text}-->") == "<!----&gt;comment-->"
+        assert html(t"<!--{text}-->") == "<!----&gt;comment-->"
 
     #
     # Templated -- literal text mixed with interpolation(s)
     #
-    def test_templated_str(self, to_html):
+    def test_templated_str(self):
         text = "comment"
-        assert to_html(t"<!--This is a {text}-->") == "<!--This is a comment-->"
+        assert html(t"<!--This is a {text}-->") == "<!--This is a comment-->"
 
-    def test_templated_object(self, to_html):
-        assert to_html(t"<!--This is a {0}-->") == "<!--This is a 0-->"
+    def test_templated_object(self):
+        assert html(t"<!--This is a {0}-->") == "<!--This is a 0-->"
 
-    def test_templated_none(self, to_html):
-        assert to_html(t"<!--This is a {None}-->") == "<!--This is a -->"
+    def test_templated_none(self):
+        assert html(t"<!--This is a {None}-->") == "<!--This is a -->"
 
-    def test_templated_has_dunder_html_error(self, to_html):
+    def test_templated_has_dunder_html_error(self):
         """Objects with __html__ are not processed with literal text or other interpolations."""
         text = LiteralHTML("in a comment")
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<!--This is a {text}-->")
+            _ = html(t"<!--This is a {text}-->")
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<!--{None}{text}-->")
+            _ = html(t"<!--{None}{text}-->")
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<!--This is a {Markup('Also check specialized cls.')}-->")
+            _ = html(t"<!--This is a {Markup('Also check specialized cls.')}-->")
 
-    def test_templated_multiple_interpolations(self, to_html):
+    def test_templated_multiple_interpolations(self):
         text = "comment"
         assert (
-            to_html(t"<!--This is a {text} with {0} and {None}-->")
+            html(t"<!--This is a {text} with {0} and {None}-->")
             == "<!--This is a comment with 0 and -->"
         )
 
-    def test_templated_escaping(self, to_html):
+    def test_templated_escaping(self):
         # @TODO: There doesn't seem to be a way to properly escape this
         # so we just use an entity to break the special closing string
         # even though it won't be actually unescaped by anything. There
         # might be something better for this.
         text = "-->comment"
-        assert to_html(t"<!--This is a {text}-->") == "<!--This is a --&gt;comment-->"
+        assert html(t"<!--This is a {text}-->") == "<!--This is a --&gt;comment-->"
 
-    def test_not_supported__recursive_template_error(self, to_html):
+    def test_not_supported__recursive_template_error(self):
         text_t = t"comment"
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<!--{text_t}-->")
+            _ = html(t"<!--{text_t}-->")
 
-    def test_not_supported_recursive_iterable_error(self, to_html):
+    def test_not_supported_recursive_iterable_error(self):
         texts = ["This", "is", "a", "comment"]
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<!--{texts}-->")
+            _ = html(t"<!--{texts}-->")
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestDocumentType:
-    def test_literal(self, to_html):
-        assert to_html(t"<!doctype html>") == "<!DOCTYPE html>"
+    def test_literal(self):
+        assert html(t"<!doctype html>") == "<!DOCTYPE html>"
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestVoidElementLiteral:
-    def test_void(self, to_html):
-        assert to_html(t"<br>") == "<br />"
+    def test_void(self):
+        assert html(t"<br>") == "<br />"
 
-    def test_void_self_closed(self, to_html):
-        assert to_html(t"<br />") == "<br />"
+    def test_void_self_closed(self):
+        assert html(t"<br />") == "<br />"
 
-    def test_void_mixed_closing(self, to_html):
-        assert to_html(t"<br>Is this content?<br />") == "<br />Is this content?<br />"
+    def test_void_mixed_closing(self):
+        assert html(t"<br>Is this content?<br />") == "<br />Is this content?<br />"
 
-    def test_chain_of_void_elements(self, to_html):
+    def test_chain_of_void_elements(self):
         # Make sure our handling of CPython issue #69445 is reasonable.
         assert (
-            to_html(t"<br><hr><img src='image.png' /><br /><hr>")
+            html(t"<br><hr><img src='image.png' /><br /><hr>")
             == '<br /><hr /><img src="image.png" /><br /><hr />'
         )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestNormalTextElementLiteral:
-    def test_empty(self, to_html):
-        assert to_html(t"<div></div>") == "<div></div>"
+    def test_empty(self):
+        assert html(t"<div></div>") == "<div></div>"
 
-    def test_with_text(self, to_html):
-        assert to_html(t"<p>Hello, world!</p>") == "<p>Hello, world!</p>"
+    def test_with_text(self):
+        assert html(t"<p>Hello, world!</p>") == "<p>Hello, world!</p>"
 
-    def test_nested_elements(self, to_html):
+    def test_nested_elements(self):
         assert (
-            to_html(t"<div><p>Hello</p><p>World</p></div>")
+            html(t"<div><p>Hello</p><p>World</p></div>")
             == "<div><p>Hello</p><p>World</p></div>"
         )
 
-    def test_entities_are_escaped(self, to_html):
+    def test_entities_are_escaped(self):
         """Literal entities interpreted by parser but escaped in output."""
-        res = to_html(t"<p>&lt;/p&gt;</p>")
+        res = html(t"<p>&lt;/p&gt;</p>")
         assert res == "<p>&lt;/p&gt;</p>", res
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestNormalTextElementDynamic:
-    def test_singleton_None(self, to_html):
-        assert to_html(t"<p>{None}</p>") == "<p></p>"
+    def test_singleton_None(self):
+        assert html(t"<p>{None}</p>") == "<p></p>"
 
-    def test_singleton_str(self, to_html):
+    def test_singleton_str(self):
         name = "Alice"
-        assert to_html(t"<p>{name}</p>") == "<p>Alice</p>"
+        assert html(t"<p>{name}</p>") == "<p>Alice</p>"
 
-    def test_singleton_object(self, to_html):
-        assert to_html(t"<p>{0}</p>") == "<p>0</p>"
+    def test_singleton_object(self):
+        assert html(t"<p>{0}</p>") == "<p>0</p>"
 
-    def test_singleton_has_dunder_html(self, to_html):
+    def test_singleton_has_dunder_html(self):
         content = LiteralHTML("<em>Alright!</em>")
-        assert to_html(t"<p>{content}</p>") == "<p><em>Alright!</em></p>"
+        assert html(t"<p>{content}</p>") == "<p><em>Alright!</em></p>"
 
-    def test_singleton_simple_template(self, to_html):
+    def test_singleton_simple_template(self):
         name = "Alice"
         text_t = t"Hi {name}"
-        assert to_html(t"<p>{text_t}</p>") == "<p>Hi Alice</p>"
+        assert html(t"<p>{text_t}</p>") == "<p>Hi Alice</p>"
 
-    def test_singleton_simple_iterable(self, to_html):
+    def test_singleton_simple_iterable(self):
         strs = ["Strings", "...", "Yeah!", "Rock", "...", "Yeah!"]
-        assert to_html(t"<p>{strs}</p>") == "<p>Strings...Yeah!Rock...Yeah!</p>"
+        assert html(t"<p>{strs}</p>") == "<p>Strings...Yeah!Rock...Yeah!</p>"
 
-    def test_singleton_escaping(self, to_html):
+    def test_singleton_escaping(self):
         text = '''<>&'"'''
-        assert to_html(t"<p>{text}</p>") == "<p>&lt;&gt;&amp;&#39;&#34;</p>"
+        assert html(t"<p>{text}</p>") == "<p>&lt;&gt;&amp;&#39;&#34;</p>"
 
-    def test_templated_None(self, to_html):
-        assert to_html(t"<p>Response: {None}.</p>") == "<p>Response: .</p>"
+    def test_templated_None(self):
+        assert html(t"<p>Response: {None}.</p>") == "<p>Response: .</p>"
 
-    def test_templated_str(self, to_html):
+    def test_templated_str(self):
         name = "Alice"
-        assert to_html(t"<p>Response: {name}.</p>") == "<p>Response: Alice.</p>"
+        assert html(t"<p>Response: {name}.</p>") == "<p>Response: Alice.</p>"
 
-    def test_templated_object(self, to_html):
-        assert to_html(t"<p>Response: {0}.</p>") == "<p>Response: 0.</p>"
+    def test_templated_object(self):
+        assert html(t"<p>Response: {0}.</p>") == "<p>Response: 0.</p>"
 
-    def test_templated_has_dunder_html(self, to_html):
+    def test_templated_has_dunder_html(self):
         text = LiteralHTML("<em>Alright!</em>")
         assert (
-            to_html(t"<p>Response: {text}.</p>")
-            == "<p>Response: <em>Alright!</em>.</p>"
+            html(t"<p>Response: {text}.</p>") == "<p>Response: <em>Alright!</em>.</p>"
         )
 
-    def test_templated_simple_template(self, to_html):
+    def test_templated_simple_template(self):
         name = "Alice"
         text_t = t"Hi {name}"
-        assert to_html(t"<p>Response: {text_t}.</p>") == "<p>Response: Hi Alice.</p>"
+        assert html(t"<p>Response: {text_t}.</p>") == "<p>Response: Hi Alice.</p>"
 
-    def test_templated_simple_iterable(self, to_html):
+    def test_templated_simple_iterable(self):
         strs = ["Strings", "...", "Yeah!", "Rock", "...", "Yeah!"]
         assert (
-            to_html(t"<p>Response: {strs}.</p>")
+            html(t"<p>Response: {strs}.</p>")
             == "<p>Response: Strings...Yeah!Rock...Yeah!.</p>"
         )
 
-    def test_templated_escaping(self, to_html):
+    def test_templated_escaping(self):
         text = '''<>&'"'''
         assert (
-            to_html(t"<p>Response: {text}.</p>")
+            html(t"<p>Response: {text}.</p>")
             == "<p>Response: &lt;&gt;&amp;&#39;&#34;.</p>"
         )
 
-    def test_templated_escaping_in_literals(self, to_html):
+    def test_templated_escaping_in_literals(self):
         text = "This text is fine"
         assert (
-            to_html(t"<p>The literal has &lt; in it: {text}.</p>")
+            html(t"<p>The literal has &lt; in it: {text}.</p>")
             == "<p>The literal has &lt; in it: This text is fine.</p>"
         )
 
-    def test_iterable_of_templates(self, to_html):
+    def test_iterable_of_templates(self):
         items = ["Apple", "Banana", "Cherry"]
         assert (
-            to_html(t"<ul>{[t'<li>{item}</li>' for item in items]}</ul>")
+            html(t"<ul>{[t'<li>{item}</li>' for item in items]}</ul>")
             == "<ul><li>Apple</li><li>Banana</li><li>Cherry</li></ul>"
         )
 
-    def test_iterable_of_templates_of_iterable_of_templates(self, to_html):
+    def test_iterable_of_templates_of_iterable_of_templates(self):
         outer = ["fruit", "more fruit"]
         inner = ["apple", "banana", "cherry"]
         inner_items = [t"<li>{item}</li>" for item in inner]
@@ -328,400 +300,389 @@ class TestNormalTextElementDynamic:
             t"<li>{category}<ul>{inner_items}</ul></li>" for category in outer
         ]
         assert (
-            to_html(t"<ul>{outer_items}</ul>")
+            html(t"<ul>{outer_items}</ul>")
             == "<ul><li>fruit<ul><li>apple</li><li>banana</li><li>cherry</li></ul></li><li>more fruit<ul><li>apple</li><li>banana</li><li>cherry</li></ul></li></ul>"
         )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestRawTextElementLiteral:
-    def test_script_empty(self, to_html):
-        assert to_html(t"<script></script>") == "<script></script>"
+    def test_script_empty(self):
+        assert html(t"<script></script>") == "<script></script>"
 
-    def test_style_empty(self, to_html):
-        assert to_html(t"<style></style>") == "<style></style>"
+    def test_style_empty(self):
+        assert html(t"<style></style>") == "<style></style>"
 
-    def test_script_with_content(self, to_html):
-        assert to_html(t"<script>var x = 1;</script>") == "<script>var x = 1;</script>"
+    def test_script_with_content(self):
+        assert html(t"<script>var x = 1;</script>") == "<script>var x = 1;</script>"
 
-    def test_style_with_content(self, to_html):
+    def test_style_with_content(self):
         # @NOTE: Double {{ and }} to avoid t-string interpolation.
         assert (
-            to_html(t"<style>.red {{ color: red; }}</style>")
+            html(t"<style>.red {{ color: red; }}</style>")
             == "<style>.red { color: red; }</style>"
         )
 
-    def test_script_with_content_escaped_in_normal_text(self, to_html):
+    def test_script_with_content_escaped_in_normal_text(self):
         # @NOTE: Double {{ and }} to avoid t-string interpolation.
         assert (
-            to_html(
-                t"<script>function CompareNumbers(a, b) {{ return a < b; }}</script>"
-            )
+            html(t"<script>function CompareNumbers(a, b) {{ return a < b; }}</script>")
             == "<script>function CompareNumbers(a, b) { return a < b; }</script>"
         ), "The < should not be escaped."
 
-    def test_style_with_content_escaped_in_normal_text(self, to_html):
+    def test_style_with_content_escaped_in_normal_text(self):
         # @NOTE: Double {{ and }} to avoid t-string interpolation.
         assert (
-            to_html(t"<style>section > h4 {{ background-color: red; }}</style>")
+            html(t"<style>section > h4 {{ background-color: red; }}</style>")
             == "<style>section > h4 { background-color: red; }</style>"
         ), "The > should not be escaped."
 
-    def test_not_supported_recursive_template_error(self, to_html):
+    def test_not_supported_recursive_template_error(self):
         text_t = t"comment"
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<!--{text_t}-->")
+            _ = html(t"<!--{text_t}-->")
 
-    def test_not_supported_recursive_iterable_error(self, to_html):
+    def test_not_supported_recursive_iterable_error(self):
         texts = ["This", "is", "a", "comment"]
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<!--{texts}-->")
+            _ = html(t"<!--{texts}-->")
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestEscapableRawTextElementLiteral:
-    def test_title_empty(self, to_html):
-        assert to_html(t"<title></title>") == "<title></title>"
+    def test_title_empty(self):
+        assert html(t"<title></title>") == "<title></title>"
 
-    def test_textarea_empty(self, to_html):
-        assert to_html(t"<textarea></textarea>") == "<textarea></textarea>"
+    def test_textarea_empty(self):
+        assert html(t"<textarea></textarea>") == "<textarea></textarea>"
 
-    def test_title_with_content(self, to_html):
-        assert to_html(t"<title>Content</title>") == "<title>Content</title>"
+    def test_title_with_content(self):
+        assert html(t"<title>Content</title>") == "<title>Content</title>"
 
-    def test_textarea_with_content(self, to_html):
+    def test_textarea_with_content(self):
+        assert html(t"<textarea>Content</textarea>") == "<textarea>Content</textarea>"
+
+    def test_title_with_escapable_content(self):
         assert (
-            to_html(t"<textarea>Content</textarea>") == "<textarea>Content</textarea>"
-        )
-
-    def test_title_with_escapable_content(self, to_html):
-        assert (
-            to_html(t"<title>Are t-strings > everything?</title>")
+            html(t"<title>Are t-strings > everything?</title>")
             == "<title>Are t-strings &gt; everything?</title>"
         ), "The > can be escaped in this content type."
 
-    def test_textarea_with_escapable_content(self, to_html):
+    def test_textarea_with_escapable_content(self):
         assert (
-            to_html(t"<textarea><p>Welcome To TDOM</p></textarea>")
+            html(t"<textarea><p>Welcome To TDOM</p></textarea>")
             == "<textarea>&lt;p&gt;Welcome To TDOM&lt;/p&gt;</textarea>"
         ), "The p tags can be escaped in this content type."
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestRawTextScriptDynamic:
-    def test_singleton_none(self, to_html):
-        assert to_html(t"<script>{None}</script>") == "<script></script>"
+    def test_singleton_none(self):
+        assert html(t"<script>{None}</script>") == "<script></script>"
 
-    def test_singleton_str(self, to_html):
+    def test_singleton_str(self):
         content = "var x = 1;"
-        assert to_html(t"<script>{content}</script>") == "<script>var x = 1;</script>"
+        assert html(t"<script>{content}</script>") == "<script>var x = 1;</script>"
 
-    def test_singleton_object(self, to_html):
+    def test_singleton_object(self):
         content = 0
-        assert to_html(t"<script>{content}</script>") == "<script>0</script>"
+        assert html(t"<script>{content}</script>") == "<script>0</script>"
 
-    def test_singleton_has_dunder_html_pitfall(self, to_html):
+    def test_singleton_has_dunder_html_pitfall(self):
         # @TODO: We should probably put some double override to prevent this by accident.
         # Or just disable this and if people want to do this then put the
         # content in a SCRIPT and inject the whole thing with a __html__?
         content = LiteralHTML("</script>")
-        assert to_html(t"<script>{content}</script>") == "<script></script></script>", (
+        assert html(t"<script>{content}</script>") == "<script></script></script>", (
             "DO NOT DO THIS! This is just an advanced escape hatch! Use a data attribute and parseJSON!"
         )
 
-    def test_singleton_escaping(self, to_html):
+    def test_singleton_escaping(self):
         content = "</script>"
         script_t = t"<script>{content}</script>"
         bad_output = script_t.strings[0] + content + script_t.strings[1]
-        assert to_html(script_t) == "<script>\\x3c/script></script>"
-        assert to_html(script_t) != bad_output, "Sanity check."
+        assert html(script_t) == "<script>\\x3c/script></script>"
+        assert html(script_t) != bad_output, "Sanity check."
 
-    def test_templated_none(self, to_html):
+    def test_templated_none(self):
         assert (
-            to_html(t"<script>var x = 1;{None};</script>")
+            html(t"<script>var x = 1;{None};</script>")
             == "<script>var x = 1;;</script>"
         )
 
-    def test_templated_str(self, to_html):
+    def test_templated_str(self):
         content = "var x = 1"
         assert (
-            to_html(t"<script>var x = 0;{content};</script>")
+            html(t"<script>var x = 0;{content};</script>")
             == "<script>var x = 0;var x = 1;</script>"
         )
 
-    def test_templated_object(self, to_html):
+    def test_templated_object(self):
         content = 0
         assert (
-            to_html(t"<script>var x = {content};</script>")
+            html(t"<script>var x = {content};</script>")
             == "<script>var x = 0;</script>"
         )
 
-    def test_templated_has_dunder_html(self, to_html):
+    def test_templated_has_dunder_html(self):
         content = LiteralHTML("anything")
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<script>var x = 1;{content}</script>")
+            _ = html(t"<script>var x = 1;{content}</script>")
 
-    def test_templated_escaping(self, to_html):
+    def test_templated_escaping(self):
         content = "</script>"
         script_t = t"<script>var x = '{content}';</script>"
         bad_output = script_t.strings[0] + content + script_t.strings[1]
-        assert to_html(script_t) == "<script>var x = '\\x3c/script>';</script>"
-        assert to_html(script_t) != bad_output, "Sanity check."
+        assert html(script_t) == "<script>var x = '\\x3c/script>';</script>"
+        assert html(script_t) != bad_output, "Sanity check."
 
-    def test_templated_multiple_interpolations(self, to_html):
+    def test_templated_multiple_interpolations(self):
         assert (
-            to_html(t"<script>var x = {1}; var y = {2};</script>")
+            html(t"<script>var x = {1}; var y = {2};</script>")
             == "<script>var x = 1; var y = 2;</script>"
         )
 
-    def test_not_supported_recursive_template_error(self, to_html):
+    def test_not_supported_recursive_template_error(self):
         text_t = t"script"
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<script>{text_t}</script>")
+            _ = html(t"<script>{text_t}</script>")
 
-    def test_not_supported_recursive_iterable_error(self, to_html):
+    def test_not_supported_recursive_iterable_error(self):
         texts = ["This", "is", "a", "script"]
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<script>{texts}</script>")
+            _ = html(t"<script>{texts}</script>")
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestRawTextStyleDynamic:
-    def test_singleton_none(self, to_html):
-        assert to_html(t"<style>{None}</style>") == "<style></style>"
+    def test_singleton_none(self):
+        assert html(t"<style>{None}</style>") == "<style></style>"
 
-    def test_singleton_str(self, to_html):
+    def test_singleton_str(self):
         content = "div { background-color: red; }"
         assert (
-            to_html(t"<style>{content}</style>")
+            html(t"<style>{content}</style>")
             == "<style>div { background-color: red; }</style>"
         )
 
-    def test_singleton_object(self, to_html):
+    def test_singleton_object(self):
         content = 0
-        assert to_html(t"<style>{content}</style>") == "<style>0</style>"
+        assert html(t"<style>{content}</style>") == "<style>0</style>"
 
-    def test_singleton_has_dunder_html_pitfall(self, to_html):
+    def test_singleton_has_dunder_html_pitfall(self):
         # @TODO: We should probably put some double override to prevent this by accident.
         # Or just disable this and if people want to do this then put the
         # content in a STYLE and inject the whole thing with a __html__?
         content = LiteralHTML("</style>")
-        assert to_html(t"<style>{content}</style>") == "<style></style></style>", (
+        assert html(t"<style>{content}</style>") == "<style></style></style>", (
             "DO NOT DO THIS! This is just an advanced escape hatch!"
         )
 
-    def test_singleton_escaping(self, to_html):
+    def test_singleton_escaping(self):
         content = "</style>"
         style_t = t"<style>{content}</style>"
         bad_output = style_t.strings[0] + content + style_t.strings[1]
-        assert to_html(style_t) == "<style>&lt;/style></style>"
-        assert to_html(style_t) != bad_output, "Sanity check."
+        assert html(style_t) == "<style>&lt;/style></style>"
+        assert html(style_t) != bad_output, "Sanity check."
 
-    def test_templated_none(self, to_html):
+    def test_templated_none(self):
         assert (
-            to_html(t"<style>h1 {{ background-color: red; }}{None}</style>")
+            html(t"<style>h1 {{ background-color: red; }}{None}</style>")
             == "<style>h1 { background-color: red; }</style>"
         )
 
-    def test_templated_str(self, to_html):
+    def test_templated_str(self):
         content = " h2 { background-color: blue; }"
         assert (
-            to_html(t"<style>h1 {{ background-color: red; }}{content}</style>")
+            html(t"<style>h1 {{ background-color: red; }}{content}</style>")
             == "<style>h1 { background-color: red; } h2 { background-color: blue; }</style>"
         )
 
-    def test_templated_object(self, to_html):
+    def test_templated_object(self):
         padding_right = 0
         assert (
-            to_html(t"<style>h1 {{ padding-right: {padding_right}px; }}</style>")
+            html(t"<style>h1 {{ padding-right: {padding_right}px; }}</style>")
             == "<style>h1 { padding-right: 0px; }</style>"
         )
 
-    def test_templated_has_dunder_html(self, to_html):
+    def test_templated_has_dunder_html(self):
         content = LiteralHTML("anything")
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<style>h1 {{ color: red; }};{content}</style>")
+            _ = html(t"<style>h1 {{ color: red; }};{content}</style>")
 
-    def test_templated_escaping(self, to_html):
+    def test_templated_escaping(self):
         content = "</style>"
         style_t = t"<style>div {{ background-color: red; }} {content}</style>"
         bad_output = style_t.strings[0] + content + style_t.strings[1]
         assert (
-            to_html(style_t)
-            == "<style>div { background-color: red; } &lt;/style></style>"
+            html(style_t) == "<style>div { background-color: red; } &lt;/style></style>"
         )
-        assert to_html(style_t) != bad_output, "Sanity check."
+        assert html(style_t) != bad_output, "Sanity check."
 
-    def test_templated_multiple_interpolations(self, to_html):
+    def test_templated_multiple_interpolations(self):
         assert (
-            to_html(
+            html(
                 t"<style>h1 {{ background-color: {'red'}; }} h2 {{ background-color: {'blue'}; }}</style>"
             )
             == "<style>h1 { background-color: red; } h2 { background-color: blue; }</style>"
         )
 
-    def test_not_supported_recursive_template_error(self, to_html):
+    def test_not_supported_recursive_template_error(self):
         text_t = t"style"
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<style>{text_t}</style>")
+            _ = html(t"<style>{text_t}</style>")
 
-    def test_not_supported_recursive_iterable_error(self, to_html):
+    def test_not_supported_recursive_iterable_error(self):
         texts = ["This", "is", "a", "style"]
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<style>{texts}</style>")
+            _ = html(t"<style>{texts}</style>")
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestEscapableRawTextTitleDynamic:
-    def test_singleton_none(self, to_html):
-        assert to_html(t"<title>{None}</title>") == "<title></title>"
+    def test_singleton_none(self):
+        assert html(t"<title>{None}</title>") == "<title></title>"
 
-    def test_singleton_str(self, to_html):
+    def test_singleton_str(self):
         content = "Welcome To TDOM"
-        assert to_html(t"<title>{content}</title>") == "<title>Welcome To TDOM</title>"
+        assert html(t"<title>{content}</title>") == "<title>Welcome To TDOM</title>"
 
-    def test_singleton_object(self, to_html):
+    def test_singleton_object(self):
         content = 0
-        assert to_html(t"<title>{content}</title>") == "<title>0</title>"
+        assert html(t"<title>{content}</title>") == "<title>0</title>"
 
-    def test_singleton_has_dunder_html_pitfall(self, to_html):
+    def test_singleton_has_dunder_html_pitfall(self):
         # @TODO: We should probably put some double override to prevent this by accident.
         content = LiteralHTML("</title>")
-        assert to_html(t"<title>{content}</title>") == "<title></title></title>", (
+        assert html(t"<title>{content}</title>") == "<title></title></title>", (
             "DO NOT DO THIS! This is just an advanced escape hatch!"
         )
 
-    def test_singleton_escaping(self, to_html):
+    def test_singleton_escaping(self):
         content = "</title>"
-        assert to_html(t"<title>{content}</title>") == "<title>&lt;/title&gt;</title>"
+        assert html(t"<title>{content}</title>") == "<title>&lt;/title&gt;</title>"
 
-    def test_templated_none(self, to_html):
+    def test_templated_none(self):
         assert (
-            to_html(t"<title>A great story about: {None}</title>")
+            html(t"<title>A great story about: {None}</title>")
             == "<title>A great story about: </title>"
         )
 
-    def test_templated_str(self, to_html):
+    def test_templated_str(self):
         content = "TDOM"
         assert (
-            to_html(t"<title>A great story about: {content}</title>")
+            html(t"<title>A great story about: {content}</title>")
             == "<title>A great story about: TDOM</title>"
         )
 
-    def test_templated_object(self, to_html):
+    def test_templated_object(self):
         content = 0
         assert (
-            to_html(t"<title>A great number: {content}</title>")
+            html(t"<title>A great number: {content}</title>")
             == "<title>A great number: 0</title>"
         )
 
-    def test_templated_has_dunder_html(self, to_html):
+    def test_templated_has_dunder_html(self):
         content = LiteralHTML("No")
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<title>Literal html?: {content}</title>")
+            _ = html(t"<title>Literal html?: {content}</title>")
 
-    def test_templated_escaping(self, to_html):
+    def test_templated_escaping(self):
         content = "</title>"
         assert (
-            to_html(t"<title>The end tag: {content}.</title>")
+            html(t"<title>The end tag: {content}.</title>")
             == "<title>The end tag: &lt;/title&gt;.</title>"
         )
 
-    def test_templated_multiple_interpolations(self, to_html):
+    def test_templated_multiple_interpolations(self):
         assert (
-            to_html(t"<title>The number {0} is less than {1}.</title>")
+            html(t"<title>The number {0} is less than {1}.</title>")
             == "<title>The number 0 is less than 1.</title>"
         )
 
-    def test_not_supported_recursive_template_error(self, to_html):
+    def test_not_supported_recursive_template_error(self):
         text_t = t"title"
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<title>{text_t}</title>")
+            _ = html(t"<title>{text_t}</title>")
 
-    def test_not_supported_recursive_iterable_error(self, to_html):
+    def test_not_supported_recursive_iterable_error(self):
         texts = ["This", "is", "a", "title"]
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<title>{texts}</title>")
+            _ = html(t"<title>{texts}</title>")
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestEscapableRawTextTextareaDynamic:
-    def test_singleton_none(self, to_html):
-        assert to_html(t"<textarea>{None}</textarea>") == "<textarea></textarea>"
+    def test_singleton_none(self):
+        assert html(t"<textarea>{None}</textarea>") == "<textarea></textarea>"
 
-    def test_singleton_str(self, to_html):
+    def test_singleton_str(self):
         content = "Welcome To TDOM"
         assert (
-            to_html(t"<textarea>{content}</textarea>")
+            html(t"<textarea>{content}</textarea>")
             == "<textarea>Welcome To TDOM</textarea>"
         )
 
-    def test_singleton_object(self, to_html):
+    def test_singleton_object(self):
         content = 0
-        assert to_html(t"<textarea>{content}</textarea>") == "<textarea>0</textarea>"
+        assert html(t"<textarea>{content}</textarea>") == "<textarea>0</textarea>"
 
-    def test_singleton_has_dunder_html_pitfall(self, to_html):
+    def test_singleton_has_dunder_html_pitfall(self):
         # @TODO: We should probably put some double override to prevent this by accident.
         content = LiteralHTML("</textarea>")
         assert (
-            to_html(t"<textarea>{content}</textarea>")
+            html(t"<textarea>{content}</textarea>")
             == "<textarea></textarea></textarea>"
         ), "DO NOT DO THIS! This is just an advanced escape hatch!"
 
-    def test_singleton_escaping(self, to_html):
+    def test_singleton_escaping(self):
         content = "</textarea>"
         assert (
-            to_html(t"<textarea>{content}</textarea>")
+            html(t"<textarea>{content}</textarea>")
             == "<textarea>&lt;/textarea&gt;</textarea>"
         )
 
-    def test_templated_none(self, to_html):
+    def test_templated_none(self):
         assert (
-            to_html(t"<textarea>A great story about: {None}</textarea>")
+            html(t"<textarea>A great story about: {None}</textarea>")
             == "<textarea>A great story about: </textarea>"
         )
 
-    def test_templated_str(self, to_html):
+    def test_templated_str(self):
         content = "TDOM"
         assert (
-            to_html(t"<textarea>A great story about: {content}</textarea>")
+            html(t"<textarea>A great story about: {content}</textarea>")
             == "<textarea>A great story about: TDOM</textarea>"
         )
 
-    def test_templated_object(self, to_html):
+    def test_templated_object(self):
         content = 0
         assert (
-            to_html(t"<textarea>A great number: {content}</textarea>")
+            html(t"<textarea>A great number: {content}</textarea>")
             == "<textarea>A great number: 0</textarea>"
         )
 
-    def test_templated_has_dunder_html(self, to_html):
+    def test_templated_has_dunder_html(self):
         content = LiteralHTML("No")
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<textarea>Literal html?: {content}</textarea>")
+            _ = html(t"<textarea>Literal html?: {content}</textarea>")
 
-    def test_templated_multiple_interpolations(self, to_html):
+    def test_templated_multiple_interpolations(self):
         assert (
-            to_html(t"<textarea>The number {0} is less than {1}.</textarea>")
+            html(t"<textarea>The number {0} is less than {1}.</textarea>")
             == "<textarea>The number 0 is less than 1.</textarea>"
         )
 
-    def test_templated_escaping(self, to_html):
+    def test_templated_escaping(self):
         content = "</textarea>"
         assert (
-            to_html(t"<textarea>The end tag: {content}.</textarea>")
+            html(t"<textarea>The end tag: {content}.</textarea>")
             == "<textarea>The end tag: &lt;/textarea&gt;.</textarea>"
         )
 
-    def test_not_supported_recursive_template_error(self, to_html):
+    def test_not_supported_recursive_template_error(self):
         text_t = t"textarea"
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<textarea>{text_t}</textarea>")
+            _ = html(t"<textarea>{text_t}</textarea>")
 
-    def test_not_supported_recursive_iterable_error(self, to_html):
+    def test_not_supported_recursive_iterable_error(self):
         texts = ["This", "is", "a", "textarea"]
         with pytest.raises(ValueError, match="not supported"):
-            _ = to_html(t"<textarea>{texts}</textarea>")
+            _ = html(t"<textarea>{texts}</textarea>")
 
 
 class Convertible:
@@ -757,93 +718,90 @@ def wrap_text_in_tags(start_tag: str, content: str, end_tag: str | None = None):
     return f"<{start_tag}>" + content + f"</{end_tag}>"
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestInterpolationConversion:
-    def test_str(self, to_html):
+    def test_str(self):
         c = Convertible()
         for tag in ("p", "script", "title"):
-            assert to_html(wrap_template_in_tags(tag, t"{c!s}")) == wrap_text_in_tags(
+            assert html(wrap_template_in_tags(tag, t"{c!s}")) == wrap_text_in_tags(
                 tag, "string"
             )
 
-    def test_repr(self, to_html):
+    def test_repr(self):
         c = Convertible()
         for tag in ("p", "script", "title"):
-            assert to_html(wrap_template_in_tags(tag, t"{c!r}")) == wrap_text_in_tags(
+            assert html(wrap_template_in_tags(tag, t"{c!r}")) == wrap_text_in_tags(
                 tag, "repr"
             )
 
-    def test_ascii_raw_text(self, to_html):
+    def test_ascii_raw_text(self):
         # single quotes are not escaped in raw text
-        assert to_html(
-            wrap_template_in_tags("script", t"{'😊'!a}")
-        ) == wrap_text_in_tags("script", ascii("😊"))
+        assert html(wrap_template_in_tags("script", t"{'😊'!a}")) == wrap_text_in_tags(
+            "script", ascii("😊")
+        )
 
-    def test_ascii_escapable_normal_and_raw(self, to_html):
+    def test_ascii_escapable_normal_and_raw(self):
         # single quotes are escaped
         for tag in ("p", "title"):
-            assert to_html(
-                wrap_template_in_tags(tag, t"{'😊'!a}")
-            ) == wrap_text_in_tags(tag, escape_html_text(ascii("😊")))
+            assert html(wrap_template_in_tags(tag, t"{'😊'!a}")) == wrap_text_in_tags(
+                tag, escape_html_text(ascii("😊"))
+            )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestInterpolationFormatSpec:
-    def test_normal_text_safe(self, to_html):
+    def test_normal_text_safe(self):
         raw_content = "<u>underlined</u>"
         assert (
-            to_html(t"<p>This is {raw_content:safe} text.</p>")
+            html(t"<p>This is {raw_content:safe} text.</p>")
             == "<p>This is <u>underlined</u> text.</p>"
         )
 
-    def test_raw_text_safe(self, to_html):
+    def test_raw_text_safe(self):
         # @TODO: What should even happen here?
         raw_content = "</script>"
         assert (
-            to_html(t"<script>{raw_content:safe}</script>")
-            == "<script></script></script>"
+            html(t"<script>{raw_content:safe}</script>") == "<script></script></script>"
         ), "DO NOT DO THIS! This is an advanced escape hatch."
 
-    def test_escapable_raw_text_safe(self, to_html):
+    def test_escapable_raw_text_safe(self):
         raw_content = "<u>underlined</u>"
         assert (
-            to_html(t"<textarea>{raw_content:safe}</textarea>")
+            html(t"<textarea>{raw_content:safe}</textarea>")
             == "<textarea><u>underlined</u></textarea>"
         )
 
-    def test_normal_text_unsafe(self, to_html):
+    def test_normal_text_unsafe(self):
         supposedly_safe = Markup("<i>italic</i>")
         assert (
-            to_html(t"<p>This is {supposedly_safe:unsafe} text.</p>")
+            html(t"<p>This is {supposedly_safe:unsafe} text.</p>")
             == "<p>This is &lt;i&gt;italic&lt;/i&gt; text.</p>"
         )
 
-    def test_raw_text_unsafe(self, to_html):
+    def test_raw_text_unsafe(self):
         # @TODO: What should even happen here?
         supposedly_safe = "</script>"
         assert (
-            to_html(t"<script>{supposedly_safe:unsafe}</script>")
+            html(t"<script>{supposedly_safe:unsafe}</script>")
             == "<script>\\x3c/script></script>"
         )
         assert (
-            to_html(t"<script>{supposedly_safe:unsafe}</script>")
+            html(t"<script>{supposedly_safe:unsafe}</script>")
             != "<script></script></script>"
         )  # Sanity check
 
-    def test_escapable_raw_text_unsafe(self, to_html):
+    def test_escapable_raw_text_unsafe(self):
         supposedly_safe = Markup("<i>italic</i>")
         assert (
-            to_html(t"<textarea>{supposedly_safe:unsafe}</textarea>")
+            html(t"<textarea>{supposedly_safe:unsafe}</textarea>")
             == "<textarea>&lt;i&gt;italic&lt;/i&gt;</textarea>"
         )
 
-    def test_all_text_callback(self, to_html):
+    def test_all_text_callback(self):
         def get_value():
             return "dynamic"
 
         for tag in ("p", "script", "style"):
             assert (
-                to_html(
+                html(
                     Template(f"<{tag}>")
                     + t"The value is {get_value:callback}."
                     + Template(f"</{tag}>")
@@ -851,7 +809,7 @@ class TestInterpolationFormatSpec:
                 == f"<{tag}>The value is dynamic.</{tag}>"
             )
 
-    def test_callback_nonzero_callable_error(self, to_html):
+    def test_callback_nonzero_callable_error(self):
         def add(a, b):
             return a + b
 
@@ -859,7 +817,7 @@ class TestInterpolationFormatSpec:
 
         with pytest.raises(TypeError):
             for tag in ("p", "script", "style"):
-                _ = to_html(
+                _ = html(
                     Template(f"<{tag}>")
                     + t"The sum is {add:callback}."
                     + Template(f"</{tag}>")
@@ -871,20 +829,19 @@ class TestInterpolationFormatSpec:
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestUsagePatterns:
-    def test_conditional_rendering_with_if_else(self, to_html):
+    def test_conditional_rendering_with_if_else(self):
         is_logged_in = True
         user_profile = t"<span>Welcome, User!</span>"
         login_prompt = t"<a href='/login'>Please log in</a>"
         assert (
-            to_html(t"<div>{user_profile if is_logged_in else login_prompt}</div>")
+            html(t"<div>{user_profile if is_logged_in else login_prompt}</div>")
             == "<div><span>Welcome, User!</span></div>"
         )
 
         is_logged_in = False
         assert (
-            to_html(t"<div>{user_profile if is_logged_in else login_prompt}</div>")
+            html(t"<div>{user_profile if is_logged_in else login_prompt}</div>")
             == '<div><a href="/login">Please log in</a></div>'
         )
 
@@ -892,13 +849,12 @@ class TestUsagePatterns:
 # --------------------------------------------------------------------------
 # Attributes
 # --------------------------------------------------------------------------
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestLiteralAttribute:
     """Test literal (non-dynamic) attributes."""
 
-    def test_literal_attrs(self, to_html):
+    def test_literal_attrs(self):
         assert (
-            to_html(
+            html(
                 t"<a "
                 t" id=example_link"  # no quotes required if value has no surrounding whitespace
                 t" autofocus"  # bare / boolean
@@ -909,75 +865,72 @@ class TestLiteralAttribute:
             == '<a id="example_link" autofocus title="" href="https://example.com" target="_blank"></a>'
         )
 
-    def test_literal_attr_escaped(self, to_html):
+    def test_literal_attr_escaped(self):
         assert (
-            to_html(t'<a title="&lt;&gt;&amp;&#39;&#34;"></a>')
+            html(t'<a title="&lt;&gt;&amp;&#39;&#34;"></a>')
             == '<a title="&lt;&gt;&amp;&#39;&#34;"></a>'
         )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestInterpolatedAttribute:
     """Test interpolated attributes, entire value is an exact interpolation."""
 
-    def test_interpolated_attr(self, to_html):
+    def test_interpolated_attr(self):
         url = "https://example.com/"
-        assert to_html(t'<a href="{url}"></a>') == '<a href="https://example.com/"></a>'
+        assert html(t'<a href="{url}"></a>') == '<a href="https://example.com/"></a>'
 
-    def test_interpolated_attr_escaped(self, to_html):
+    def test_interpolated_attr_escaped(self):
         url = 'https://example.com/?q="test"&lang=en'
         assert (
-            to_html(t'<a href="{url}"></a>')
+            html(t'<a href="{url}"></a>')
             == '<a href="https://example.com/?q=&#34;test&#34;&amp;lang=en"></a>'
         )
 
-    def test_interpolated_attr_unquoted(self, to_html):
+    def test_interpolated_attr_unquoted(self):
         id = "roquefort"
-        assert to_html(t"<div id={id}></div>") == '<div id="roquefort"></div>'
+        assert html(t"<div id={id}></div>") == '<div id="roquefort"></div>'
 
-    def test_interpolated_attr_true(self, to_html):
+    def test_interpolated_attr_true(self):
         disabled = True
         assert (
-            to_html(t"<button disabled={disabled}></button>")
+            html(t"<button disabled={disabled}></button>")
             == "<button disabled></button>"
         )
 
-    def test_interpolated_attr_false(self, to_html):
+    def test_interpolated_attr_false(self):
         disabled = False
-        assert to_html(t"<button disabled={disabled}></button>") == "<button></button>"
+        assert html(t"<button disabled={disabled}></button>") == "<button></button>"
 
-    def test_interpolated_attr_none(self, to_html):
+    def test_interpolated_attr_none(self):
         disabled = None
-        assert to_html(t"<button disabled={disabled}></button>") == "<button></button>"
+        assert html(t"<button disabled={disabled}></button>") == "<button></button>"
 
-    def test_interpolate_attr_empty_string(self, to_html):
-        assert to_html(t'<div title=""></div>') == '<div title=""></div>'
+    def test_interpolate_attr_empty_string(self):
+        assert html(t'<div title=""></div>') == '<div title=""></div>'
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestSpreadAttribute:
     """Test spread attributes."""
 
-    def test_spread_attr(self, to_html):
+    def test_spread_attr(self):
         attrs = {"href": "https://example.com/", "target": "_blank"}
         assert (
-            to_html(t"<a {attrs}></a>")
+            html(t"<a {attrs}></a>")
             == '<a href="https://example.com/" target="_blank"></a>'
         )
 
-    def test_spread_attr_none(self, to_html):
+    def test_spread_attr_none(self):
         attrs = None
-        assert to_html(t"<a {attrs}></a>") == "<a></a>"
+        assert html(t"<a {attrs}></a>") == "<a></a>"
 
-    def test_spread_attr_type_errors(self, to_html):
+    def test_spread_attr_type_errors(self):
         for attrs in (0, [], (), False, True):
             with pytest.raises(TypeError):
-                _ = to_html(t"<a {attrs}></a>")
+                _ = html(t"<a {attrs}></a>")
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestTemplatedAttribute:
-    def test_templated_attr_mixed_interpolations_start_end_and_nest(self, to_html):
+    def test_templated_attr_mixed_interpolations_start_end_and_nest(self):
         left, middle, right = 1, 3, 5
         prefix, suffix = t'<div data-range="', t'"></div>'
         # Check interpolations at start, middle and/or end of templated attr
@@ -990,71 +943,69 @@ class TestTemplatedAttribute:
             test_t = (
                 prefix + left_part + t"-" + middle_part + t"-" + right_part + suffix
             )
-            assert to_html(test_t) == '<div data-range="1-3-5"></div>'
+            assert html(test_t) == '<div data-range="1-3-5"></div>'
 
-    def test_templated_attr_no_quotes(self, to_html):
+    def test_templated_attr_no_quotes(self):
         start = 1
         end = 5
         assert (
-            to_html(t"<div data-range={start}-{end}></div>")
+            html(t"<div data-range={start}-{end}></div>")
             == '<div data-range="1-5"></div>'
         )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestAttributeMerging:
-    def test_attr_merge_disjoint_interpolated_attr_spread_attr(self, to_html):
+    def test_attr_merge_disjoint_interpolated_attr_spread_attr(self):
         attrs = {"href": "https://example.com/", "id": "link1"}
         target = "_blank"
         assert (
-            to_html(t"<a {attrs} target={target}></a>")
+            html(t"<a {attrs} target={target}></a>")
             == '<a href="https://example.com/" id="link1" target="_blank"></a>'
         )
 
-    def test_attr_merge_overlapping_spread_attrs(self, to_html):
+    def test_attr_merge_overlapping_spread_attrs(self):
         attrs1 = {"href": "https://example.com/", "id": "overwrtten"}
         attrs2 = {"target": "_blank", "id": "link1"}
         assert (
-            to_html(t"<a {attrs1} {attrs2}></a>")
+            html(t"<a {attrs1} {attrs2}></a>")
             == '<a href="https://example.com/" target="_blank" id="link1"></a>'
         )
 
-    def test_attr_merge_replace_literal_attr_str_str(self, to_html):
+    def test_attr_merge_replace_literal_attr_str_str(self):
         d_title = {"title": "fresh"}
         assert (
-            to_html(t'<div title="default" {d_title}></div>')
+            html(t'<div title="default" {d_title}></div>')
             == '<div title="fresh"></div>'
         )
 
-    def test_attr_merge_replace_literal_attr_str_true(self, to_html):
+    def test_attr_merge_replace_literal_attr_str_true(self):
         d_title = {"title": True}
-        assert to_html(t'<div title="default" {d_title}></div>') == "<div title></div>"
+        assert html(t'<div title="default" {d_title}></div>') == "<div title></div>"
 
-    def test_attr_merge_replace_literal_attr_true_str(self, to_html):
+    def test_attr_merge_replace_literal_attr_true_str(self):
         d_title = {"title": "fresh"}
-        assert to_html(t"<div title {d_title}></div>") == '<div title="fresh"></div>'
+        assert html(t"<div title {d_title}></div>") == '<div title="fresh"></div>'
 
-    def test_attr_merge_remove_literal_attr_str_none(self, to_html):
+    def test_attr_merge_remove_literal_attr_str_none(self):
         d_title = {"title": None}
-        assert to_html(t'<div title="default" {d_title}></div>') == "<div></div>"
+        assert html(t'<div title="default" {d_title}></div>') == "<div></div>"
 
-    def test_attr_merge_remove_literal_attr_true_none(self, to_html):
+    def test_attr_merge_remove_literal_attr_true_none(self):
         d_title = {"title": None}
-        assert to_html(t"<div title {d_title}></div>") == "<div></div>"
+        assert html(t"<div title {d_title}></div>") == "<div></div>"
 
-    def test_attr_merge_other_literal_attr_intact(self, to_html):
+    def test_attr_merge_other_literal_attr_intact(self):
         d_alt = {"alt": "fresh"}
         assert (
-            to_html(t'<img title="default" {d_alt}>')
+            html(t'<img title="default" {d_alt}>')
             == '<img title="default" alt="fresh" />'
         )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestSpecialDataAttribute:
     """Special data attribute handling."""
 
-    def test_interpolated_data_attributes(self, to_html):
+    def test_interpolated_data_attributes(self):
         data = {
             "user-id": 123,
             "role": "admin",
@@ -1063,93 +1014,91 @@ class TestSpecialDataAttribute:
             "none": None,
         }
         assert (
-            to_html(t"<div data={data}>User Info</div>")
+            html(t"<div data={data}>User Info</div>")
             == '<div data-user-id="123" data-role="admin" data-wild>User Info</div>'
         )
 
-    def test_data_attr_toggle_to_str(self, to_html):
+    def test_data_attr_toggle_to_str(self):
         d_selected = {"selected": "yes"}
         for res in [
-            to_html(t"<div data-selected data={d_selected}></div>"),
-            to_html(t'<div data-selected="no" data={d_selected}></div>'),
+            html(t"<div data-selected data={d_selected}></div>"),
+            html(t'<div data-selected="no" data={d_selected}></div>'),
         ]:
             assert res == '<div data-selected="yes"></div>'
 
-    def test_data_attr_toggle_to_true(self, to_html):
+    def test_data_attr_toggle_to_true(self):
         d_selected = {"selected": True}
-        res = to_html(t'<div data-selected="yes" data={d_selected}></div>')
+        res = html(t'<div data-selected="yes" data={d_selected}></div>')
         assert res == "<div data-selected></div>"
 
-    def test_data_attr_unrelated_unaffected(self, to_html):
+    def test_data_attr_unrelated_unaffected(self):
         d_active = {"active": True}
-        res = to_html(t"<div data-selected data={d_active}></div>")
+        res = html(t"<div data-selected data={d_active}></div>")
         assert res == "<div data-selected data-active></div>"
 
-    def test_data_attr_templated_error(self, to_html):
+    def test_data_attr_templated_error(self):
         data1 = {"user-id": "user-123"}
         data2 = {"role": "admin"}
         with pytest.raises(TypeError):
-            _ = to_html(t'<div data="{data1} {data2}"></div>')
+            _ = html(t'<div data="{data1} {data2}"></div>')
 
-    def test_data_attr_none(self, to_html):
+    def test_data_attr_none(self):
         button_data = None
-        res = to_html(t"<button data={button_data}>X</button>")
+        res = html(t"<button data={button_data}>X</button>")
         assert res == "<button>X</button>"
 
-    def test_data_attr_errors(self, to_html):
+    def test_data_attr_errors(self):
         for v in [False, [], (), 0, "data?"]:
             with pytest.raises(TypeError):
-                _ = to_html(t"<button data={v}>X</button>")
+                _ = html(t"<button data={v}>X</button>")
 
-    def test_data_literal_attr_bypass(self, to_html):
+    def test_data_literal_attr_bypass(self):
         # Trigger overall attribute resolution with an unrelated interpolated attr.
-        res = to_html(t'<p data="passthru" id={"resolved"}></p>')
+        res = html(t'<p data="passthru" id={"resolved"}></p>')
         assert res == '<p data="passthru" id="resolved"></p>', (
             "A single literal attribute should not trigger data expansion."
         )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestSpecialAriaAttribute:
     """Special aria attribute handling."""
 
-    def test_aria_templated_attr_error(self, to_html):
+    def test_aria_templated_attr_error(self):
         aria1 = {"label": "close"}
         aria2 = {"hidden": "true"}
         with pytest.raises(TypeError):
-            _ = to_html(t'<div aria="{aria1} {aria2}"></div>')
+            _ = html(t'<div aria="{aria1} {aria2}"></div>')
 
-    def test_aria_interpolated_attr_dict(self, to_html):
+    def test_aria_interpolated_attr_dict(self):
         aria = {"label": "Close", "hidden": True, "another": False, "more": None}
-        res = to_html(t"<button aria={aria}>X</button>")
+        res = html(t"<button aria={aria}>X</button>")
         assert (
             res
             == '<button aria-label="Close" aria-hidden="true" aria-another="false">X</button>'
         )
 
-    def test_aria_interpolate_attr_none(self, to_html):
+    def test_aria_interpolate_attr_none(self):
         button_aria = None
-        res = to_html(t"<button aria={button_aria}>X</button>")
+        res = html(t"<button aria={button_aria}>X</button>")
         assert res == "<button>X</button>"
 
-    def test_aria_attr_errors(self, to_html):
+    def test_aria_attr_errors(self):
         for v in [False, [], (), 0, "aria?"]:
             with pytest.raises(TypeError):
-                _ = to_html(t"<button aria={v}>X</button>")
+                _ = html(t"<button aria={v}>X</button>")
 
-    def test_aria_literal_attr_bypass(self, to_html):
+    def test_aria_literal_attr_bypass(self):
         # Trigger overall attribute resolution with an unrelated interpolated attr.
-        res = to_html(t'<p aria="passthru" id={"resolved"}></p>')
+        res = html(t'<p aria="passthru" id={"resolved"}></p>')
         assert res == '<p aria="passthru" id="resolved"></p>', (
             "A single literal attribute should not trigger aria expansion."
         )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestSpecialClassAttribute:
     """Special class attribute handling."""
 
-    def test_interpolated_class_attribute(self, to_html):
+    def test_interpolated_class_attribute(self):
         class_list = ["btn", "btn-primary", "one two", None]
         class_dict = {"active": True, "btn-secondary": False}
         class_str = "blue"
@@ -1165,16 +1114,16 @@ class TestSpecialClassAttribute:
             t" class={class_str} class={class_space_sep_str}"
             t" >Click me</button>"
         )
-        res = to_html(button_t)
+        res = html(button_t)
         assert (
             res
             == '<button class="red btn btn-primary one two active blue green yellow">Click me</button>'
         )
 
-    def test_interpolated_class_attribute_with_multiple_placeholders(self, to_html):
+    def test_interpolated_class_attribute_with_multiple_placeholders(self):
         classes1 = ["btn", "btn-primary"]
         classes2 = [False, None, {"active": True}]
-        res = to_html(t'<button class="{classes1} {classes2}">Click me</button>')
+        res = html(t'<button class="{classes1} {classes2}">Click me</button>')
         # CONSIDER: Is this what we want? Currently, when we have multiple
         # placeholders in a single attribute, we treat it as a string attribute.
         assert (
@@ -1184,75 +1133,74 @@ class TestSpecialClassAttribute:
             "Interpolations that are not exact, or singletons, are instead interpreted as templates and therefore these dictionaries are strified."
         )
 
-    def test_interpolated_attribute_spread_with_class_attribute(self, to_html):
+    def test_interpolated_attribute_spread_with_class_attribute(self):
         attrs = {"id": "button1", "class": ["btn", "btn-primary"]}
-        res = to_html(t"<button {attrs}>Click me</button>")
+        res = html(t"<button {attrs}>Click me</button>")
         assert res == '<button id="button1" class="btn btn-primary">Click me</button>'
 
-    def test_class_literal_attr_bypass(self, to_html):
+    def test_class_literal_attr_bypass(self):
         # Trigger overall attribute resolution with an unrelated interpolated attr.
-        res = to_html(t'<p class="red red" id={"veryred"}></p>')
+        res = html(t'<p class="red red" id={"veryred"}></p>')
         assert res == '<p class="red red" id="veryred"></p>', (
             "A single literal attribute should not trigger class accumulator."
         )
 
-    def test_class_none_ignored(self, to_html):
+    def test_class_none_ignored(self):
         class_item = None
-        res = to_html(t"<p class={class_item}></p>")
+        res = html(t"<p class={class_item}></p>")
         assert res == "<p></p>"
         # Also ignored inside a sequence.
-        res = to_html(t"<p class={[class_item]}></p>")
+        res = html(t"<p class={[class_item]}></p>")
         assert res == "<p></p>"
 
-    def test_class_type_errors(self, to_html):
+    def test_class_type_errors(self):
         for class_item in (False, True, 0):
             with pytest.raises(TypeError):
-                _ = to_html(t"<p class={class_item}></p>")
+                _ = html(t"<p class={class_item}></p>")
             with pytest.raises(TypeError):
-                _ = to_html(t"<p class={[class_item]}></p>")
+                _ = html(t"<p class={[class_item]}></p>")
 
-    def test_class_merge_literals(self, to_html):
-        res = to_html(t'<p class="red" class="blue"></p>')
+    def test_class_merge_literals(self):
+        res = html(t'<p class="red" class="blue"></p>')
         assert res == '<p class="red blue"></p>'
 
-    def test_class_merge_literal_then_interpolation(self, to_html):
+    def test_class_merge_literal_then_interpolation(self):
         class_item = "blue"
-        res = to_html(t'<p class="red" class="{[class_item]}"></p>')
+        res = html(t'<p class="red" class="{[class_item]}"></p>')
         assert res == '<p class="red blue"></p>'
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestSpecialStyleAttribute:
     """Special style attribute handling."""
 
-    def test_style_literal_attr_passthru(self, to_html):
+    def test_style_literal_attr_passthru(self):
         p_id = "para1"  # non-literal attribute to cause attr resolution
-        res = to_html(t'<p style="color: red" id={p_id}>Warning!</p>')
+        res = html(t'<p style="color: red" id={p_id}>Warning!</p>')
         assert res == '<p style="color: red" id="para1">Warning!</p>'
 
-    def test_style_in_interpolated_attr(self, to_html):
+    def test_style_in_interpolated_attr(self):
         styles = {"color": "red", "font-weight": "bold", "font-size": "16px"}
-        res = to_html(t"<p style={styles}>Warning!</p>")
+        res = html(t"<p style={styles}>Warning!</p>")
         assert (
             res
             == '<p style="color: red; font-weight: bold; font-size: 16px">Warning!</p>'
         )
 
-    def test_style_in_templated_attr(self, to_html):
+    def test_style_in_templated_attr(self):
         color = "red"
-        res = to_html(t'<p style="color: {color}">Warning!</p>')
+        res = html(t'<p style="color: {color}">Warning!</p>')
         assert res == '<p style="color: red">Warning!</p>'
 
-    def test_style_in_spread_attr(self, to_html):
+    def test_style_in_spread_attr(self):
         attrs = {"style": {"color": "red"}}
-        res = to_html(t"<p {attrs}>Warning!</p>")
+        res = html(t"<p {attrs}>Warning!</p>")
         assert res == '<p style="color: red">Warning!</p>'
 
-    def test_style_merged_from_all_attrs(self, to_html):
+    def test_style_merged_from_all_attrs(self):
         attrs = {"style": {"font-size": "15px"}}
         style = {"font-weight": "bold"}
         color = "red"
-        res = to_html(
+        res = html(
             t'<p style="font-family: serif" style="color: {color}" style={style} {attrs}></p>'
         )
         assert (
@@ -1260,7 +1208,7 @@ class TestSpecialStyleAttribute:
             == '<p style="font-family: serif; color: red; font-weight: bold; font-size: 15px"></p>'
         )
 
-    def test_style_override_left_to_right(self, to_html):
+    def test_style_override_left_to_right(self):
         suffix = t"></p>"
         d_blue = {"color": "blue"}
         d_yellow = {"style": {"color": "yellow"}}
@@ -1273,50 +1221,50 @@ class TestSpecialStyleAttribute:
         for index in range(len(parts)):
             expected_style = parts[index][1]
             t = sum((part[0] for part in parts[: index + 1]), t"") + suffix
-            res = to_html(t)
+            res = html(t)
             assert res == f'<p style="{expected_style}"></p>'
 
-    def test_interpolated_style_attribute_multiple_placeholders(self, to_html):
+    def test_interpolated_style_attribute_multiple_placeholders(self):
         styles1 = {"color": "red"}
         styles2 = {"font-weight": "bold"}
         # CONSIDER: Is this what we want? Currently, when we have multiple
         # placeholders in a single attribute, we treat it as a string attribute
         # which produces an invalid style attribute.
         with pytest.raises(ValueError):
-            _ = to_html(t"<p style='{styles1} {styles2}'>Warning!</p>")
+            _ = html(t"<p style='{styles1} {styles2}'>Warning!</p>")
 
-    def test_interpolated_style_attribute_merged(self, to_html):
+    def test_interpolated_style_attribute_merged(self):
         styles1 = {"color": "red"}
         styles2 = {"font-weight": "bold"}
-        res = to_html(t"<p style={styles1} style={styles2}>Warning!</p>")
+        res = html(t"<p style={styles1} style={styles2}>Warning!</p>")
         assert res == '<p style="color: red; font-weight: bold">Warning!</p>'
 
-    def test_interpolated_style_attribute_merged_override(self, to_html):
+    def test_interpolated_style_attribute_merged_override(self):
         styles1 = {"color": "red", "font-weight": "normal"}
         styles2 = {"font-weight": "bold"}
-        res = to_html(t"<p style={styles1} style={styles2}>Warning!</p>")
+        res = html(t"<p style={styles1} style={styles2}>Warning!</p>")
         assert res == '<p style="color: red; font-weight: bold">Warning!</p>'
 
-    def test_style_attribute_str(self, to_html):
+    def test_style_attribute_str(self):
         styles = "color: red; font-weight: bold;"
-        res = to_html(t"<p style={styles}>Warning!</p>")
+        res = html(t"<p style={styles}>Warning!</p>")
         assert res == '<p style="color: red; font-weight: bold">Warning!</p>'
 
-    def test_style_attribute_non_str_non_dict(self, to_html):
+    def test_style_attribute_non_str_non_dict(self):
         with pytest.raises(TypeError):
             styles = [1, 2]
-            _ = to_html(t"<p style={styles}>Warning!</p>")
+            _ = html(t"<p style={styles}>Warning!</p>")
 
-    def test_style_literal_attr_bypass(self, to_html):
+    def test_style_literal_attr_bypass(self):
         # Trigger overall attribute resolution with an unrelated interpolated attr.
-        res = to_html(t'<p style="invalid;invalid:" id={"resolved"}></p>')
+        res = html(t'<p style="invalid;invalid:" id={"resolved"}></p>')
         assert res == '<p style="invalid;invalid:" id="resolved"></p>', (
             "A single literal attribute should bypass style accumulator."
         )
 
-    def test_style_none(self, to_html):
+    def test_style_none(self):
         styles = None
-        res = to_html(t"<p style={styles}></p>")
+        res = html(t"<p style={styles}></p>")
         assert res == "<p></p>"
 
 
@@ -1347,7 +1295,6 @@ class TestPrepComponentKwargs:
             )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestFunctionComponent:
     @staticmethod
     def FunctionComponent(
@@ -1364,8 +1311,8 @@ class TestFunctionComponent:
         }
         return t"<div {new_attrs}>Component: {children}</div>"
 
-    def test_with_children(self, to_html):
-        res = to_html(
+    def test_with_children(self):
+        res = html(
             t'<{self.FunctionComponent} first=1 second={99} third-arg="comp1" class="my-comp">Hello, Component!</{self.FunctionComponent}>'
         )
         assert (
@@ -1373,9 +1320,9 @@ class TestFunctionComponent:
             == '<div id="comp1" data-first="1" data-second="99" class="my-comp">Component: Hello, Component!</div>'
         )
 
-    def test_with_no_children(self, to_html):
+    def test_with_no_children(self):
         """Same test, but the caller didn't provide any children."""
-        res = to_html(
+        res = html(
             t'<{self.FunctionComponent} first=1 second={99} third-arg="comp1" class="my-comp" />'
         )
         assert (
@@ -1383,14 +1330,13 @@ class TestFunctionComponent:
             == '<div id="comp1" data-first="1" data-second="99" class="my-comp">Component: </div>'
         )
 
-    def test_missing_props_error(self, to_html):
+    def test_missing_props_error(self):
         with pytest.raises(TypeError):
-            _ = to_html(
+            _ = html(
                 t"<{self.FunctionComponent}>Missing props</{self.FunctionComponent}>"
             )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestFunctionComponentNoChildren:
     @staticmethod
     def FunctionComponentNoChildren(
@@ -1406,8 +1352,8 @@ class TestFunctionComponentNoChildren:
         }
         return t"<div {new_attrs}>Component: ignore children</div>"
 
-    def test_interpolated_template_component_ignore_children(self, to_html):
-        res = to_html(
+    def test_interpolated_template_component_ignore_children(self):
+        res = html(
             t'<{self.FunctionComponentNoChildren} first=1 second={99} third-arg="comp1">Hello, Component!</{self.FunctionComponentNoChildren}>'
         )
         assert (
@@ -1416,7 +1362,6 @@ class TestFunctionComponentNoChildren:
         )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestFunctionComponentKeywordArgs:
     @staticmethod
     def FunctionComponentKeywordArgs(first: str, **attrs: t.Any) -> Template:
@@ -1427,8 +1372,8 @@ class TestFunctionComponentKeywordArgs:
         new_attrs = {"data-first": first, **attrs}
         return t"<div {new_attrs}>Component with kwargs: {children}</div>"
 
-    def test_children_always_passed_via_kwargs(self, to_html):
-        res = to_html(
+    def test_children_always_passed_via_kwargs(self):
+        res = html(
             t'<{self.FunctionComponentKeywordArgs} first="value" extra="info">Child content</{self.FunctionComponentKeywordArgs}>'
         )
         assert (
@@ -1436,8 +1381,8 @@ class TestFunctionComponentKeywordArgs:
             == '<div data-first="value" extra="info">Component with kwargs: Child content</div>'
         )
 
-    def test_children_always_passed_via_kwargs_even_when_empty(self, to_html):
-        res = to_html(
+    def test_children_always_passed_via_kwargs_even_when_empty(self):
+        res = html(
             t'<{self.FunctionComponentKeywordArgs} first="value" extra="info" />'
         )
         assert (
@@ -1445,25 +1390,24 @@ class TestFunctionComponentKeywordArgs:
         )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestComponentSpecialUsage:
     @staticmethod
     def ColumnsComponent() -> Template:
         return t"""<td>Column 1</td><td>Column 2</td>"""
 
-    def test_fragment_from_component(self, to_html):
+    def test_fragment_from_component(self):
         # This test assumes that if a component returns a template that parses
         # into multiple root elements, they are treated as a fragment.
-        res = to_html(t"<table><tr><{self.ColumnsComponent} /></tr></table>")
+        res = html(t"<table><tr><{self.ColumnsComponent} /></tr></table>")
         assert res == "<table><tr><td>Column 1</td><td>Column 2</td></tr></table>"
 
-    def test_component_passed_as_attr_value(self, to_html):
+    def test_component_passed_as_attr_value(self):
         def Wrapper(
             children: Template, sub_component: t.Callable, **attrs: t.Any
         ) -> Template:
             return t"<{sub_component} {attrs}>{children}</{sub_component}>"
 
-        res = to_html(
+        res = html(
             t'<{Wrapper} sub-component={TestFunctionComponent.FunctionComponent} class="wrapped" first=1 second={99} third-arg="comp1"><p>Inside wrapper</p></{Wrapper}>'
         )
         assert (
@@ -1471,17 +1415,16 @@ class TestComponentSpecialUsage:
             == '<div id="comp1" data-first="1" data-second="99" class="wrapped">Component: <p>Inside wrapper</p></div>'
         )
 
-    def test_nested_component_gh23(self, to_html):
+    def test_nested_component_gh23(self):
         # @DESIGN: Do we need this?  Should we recommend an alternative?
         # See https://github.com/t-strings/tdom/issues/23 for context
         def Header() -> Template:
             return t"{'Hello World'}"
 
-        res = to_html(t"<{Header} />", assume_ctx=make_ctx(parent_tag="div"))
+        res = html(t"<{Header} />", assume_ctx=make_ctx(parent_tag="div"))
         assert res == "Hello World"
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestClassComponent:
     @dataclass
     class ClassComponent:
@@ -1503,8 +1446,8 @@ class TestClassComponent:
                 t"</div>"
             )
 
-    def test_class_component_implicit_invocation_with_children(self, to_html):
-        res = to_html(
+    def test_class_component_implicit_invocation_with_children(self):
+        res = html(
             t"<{self.ClassComponent} user-name='Alice' image-url='https://example.com/alice.png'>Fun times!</{self.ClassComponent}>"
         )
         assert (
@@ -1512,14 +1455,14 @@ class TestClassComponent:
             == '<div class="avatar"><a href="#"><img src="https://example.com/alice.png" alt="Avatar of Alice" /></a><span>Alice</span>Fun times!</div>'
         )
 
-    def test_class_component_direct_invocation(self, to_html):
+    def test_class_component_direct_invocation(self):
         avatar = self.ClassComponent(
             user_name="Alice",
             image_url="https://example.com/alice.png",
             homepage="https://example.com/users/alice",
             children=t"",  # Children is required so we set it to an empty template.
         )
-        res = to_html(t"<{avatar} />")
+        res = html(t"<{avatar} />")
         assert (
             res
             == '<div class="avatar"><a href="https://example.com/users/alice"><img src="https://example.com/alice.png" alt="Avatar of Alice" /></a><span>Alice</span></div>'
@@ -1544,8 +1487,8 @@ class TestClassComponent:
                 t"</div>"
             )
 
-    def test_implicit_invocation_ignore_children(self, to_html):
-        res = to_html(
+    def test_implicit_invocation_ignore_children(self):
+        res = html(
             t"<{self.ClassComponentNoChildren} user-name='Alice' image-url='https://example.com/alice.png'>Fun times!</{self.ClassComponentNoChildren}>"
         )
         assert (
@@ -1554,8 +1497,7 @@ class TestClassComponent:
         )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
-def test_attribute_type_component(to_html):
+def test_attribute_type_component():
     def AttributeTypeComponent(
         data_int: int,
         data_true: bool,
@@ -1610,7 +1552,7 @@ def test_attribute_type_component(to_html):
         "spread_dict": {},
         "spread_list": ["eggs", "milk"],
     }
-    res = to_html(
+    res = html(
         t"<{AttributeTypeComponent} data-int={an_int} data-true={a_true} "
         t"data-false={a_false} data-none={a_none} data-float={a_float} "
         t"data-dt={a_dt} {spread_attrs}/>"
@@ -1618,20 +1560,19 @@ def test_attribute_type_component(to_html):
     assert res == "Looks good!"
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestComponentErrors:
-    def test_component_non_callable_fails(self, to_html):
+    def test_component_non_callable_fails(self):
         with pytest.raises(TypeError):
-            _ = to_html(t"<{'not a function'} />")
+            _ = html(t"<{'not a function'} />")
 
-    def test_component_requiring_positional_arg_fails(self, to_html):
+    def test_component_requiring_positional_arg_fails(self):
         def RequiresPositional(whoops: int, /) -> Template:  # pragma: no cover
             return t"<p>Positional arg: {whoops}</p>"
 
         with pytest.raises(TypeError):
-            _ = to_html(t"<{RequiresPositional} />")
+            _ = html(t"<{RequiresPositional} />")
 
-    def test_mismatched_component_closing_tag_fails(self, to_html):
+    def test_mismatched_component_closing_tag_fails(self):
         def OpenTag(children: Template) -> Template:
             return t"<div>open</div>"
 
@@ -1639,11 +1580,10 @@ class TestComponentErrors:
             return t"<div>close</div>"
 
         with pytest.raises(TypeError):
-            _ = to_html(t"<{OpenTag}>Hello</{CloseTag}>")
+            _ = html(t"<{OpenTag}>Hello</{CloseTag}>")
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
-def test_integration_basic(to_html):
+def test_integration_basic():
     comment_text = "comment is not literal"
     interpolated_class = "red"
     text_in_element = "text is not literal"
@@ -1678,7 +1618,7 @@ def test_integration_basic(to_html):
 <div>safe</div>
 </body>
 </html>"""
-    assert to_html(smoke_t) == smoke_str
+    assert html(smoke_t) == smoke_str
 
 
 def struct_repr(st):
@@ -1739,8 +1679,7 @@ def test_process_template_internal_cache():
     assert cached_tnode1 != cached_tnode4
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
-def test_repeat_calls(to_html):
+def test_repeat_calls():
     """Crude check for any unintended state being kept between calls."""
 
     def get_sample_t(idx, spread_attrs, button_text):
@@ -1751,7 +1690,7 @@ def test_repeat_calls(to_html):
         button_text = "PROCESS"
         sample_t = get_sample_t(idx, spread_attrs, button_text)
         assert (
-            to_html(sample_t)
+            html(sample_t)
             == f'<div><button data-key="{idx}" data-enabled>PROCESS</button></div>'
         )
 
@@ -1786,7 +1725,6 @@ def get_select_t_with_concat(options, selected_values):
     return sum(parts, t"")
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 @pytest.mark.parametrize(
     "provider",
     (
@@ -1795,7 +1733,7 @@ def get_select_t_with_concat(options, selected_values):
         get_select_t_with_concat,
     ),
 )
-def test_process_template_iterables(to_html, provider):
+def test_process_template_iterables(provider):
     def get_color_select_t(selected_values: set, provider: t.Callable) -> Template:
         PRIMARY_COLORS = [("R", "Red"), ("Y", "Yellow"), ("B", "Blue")]
         assert set(selected_values).issubset({opt[0] for opt in PRIMARY_COLORS})
@@ -1803,18 +1741,17 @@ def test_process_template_iterables(to_html, provider):
 
     no_selection_t = get_color_select_t(set(), provider)
     assert (
-        to_html(no_selection_t)
+        html(no_selection_t)
         == '<select><option value="R">Red</option><option value="Y">Yellow</option><option value="B">Blue</option></select>'
     )
     selected_yellow_t = get_color_select_t({"Y"}, provider)
     assert (
-        to_html(selected_yellow_t)
+        html(selected_yellow_t)
         == '<select><option value="R">Red</option><option value="Y" selected>Yellow</option><option value="B">Blue</option></select>'
     )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
-def test_component_integration(to_html):
+def test_component_integration():
     """Broadly test that common template component usage works."""
 
     def PageComponent(children, root_attrs=None):
@@ -1839,7 +1776,7 @@ def test_component_integration(to_html):
 """
 
     content = "HTML never goes out of style."
-    content_str = to_html(
+    content_str = html(
         t"<{LayoutComponent} body_classes={['theme-default']}><{PageComponent}>{content}</{PageComponent}></{LayoutComponent}>"
     )
     assert (
@@ -1860,7 +1797,6 @@ def test_component_integration(to_html):
     )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestInterpolatingHTMLInTemplateWithDynamicParentTag:
     """
     When a template does not have a parent tag we cannot determine the type
@@ -1869,7 +1805,7 @@ class TestInterpolatingHTMLInTemplateWithDynamicParentTag:
     interpolations in that text correctly.
     """
 
-    def test_dynamic_raw_text(self, to_html):
+    def test_dynamic_raw_text(self):
         """Type raw text should fail because template is already not allowed."""
         content = '<script>console.log("123!");</script>'
         content_t = t"{content}"
@@ -1877,29 +1813,28 @@ class TestInterpolatingHTMLInTemplateWithDynamicParentTag:
             ValueError, match="Recursive includes are not supported within script"
         ):
             content_t = t'<script>console.log("{123}!");</script>'
-            _ = to_html(t"<script>{content_t}</script>")
+            _ = html(t"<script>{content_t}</script>")
 
-    def test_dynamic_escapable_raw_text(self, to_html):
+    def test_dynamic_escapable_raw_text(self):
         """Type escapable raw text should fail because template is already not allowed."""
         content = '<script>console.log("123!");</script>'
         content_t = t"{content}"
         with pytest.raises(
             ValueError, match="Recursive includes are not supported within textarea"
         ):
-            _ = to_html(t"<textarea>{content_t}</textarea>")
+            _ = html(t"<textarea>{content_t}</textarea>")
 
-    def test_dynamic_normal_text(self, to_html):
+    def test_dynamic_normal_text(self):
         """Escaping should be applied when normal text type is goes into effect."""
         content = '<script>console.log("123!");</script>'
         content_t = t"{content}"
         LT, GT, DQ = map(markupsafe_escape, ["<", ">", '"'])
         assert (
-            to_html(t"<div>{content_t}</div>")
+            html(t"<div>{content_t}</div>")
             == f"<div>{LT}script{GT}console.log({DQ}123!{DQ});{LT}/script{GT}</div>"
         )
 
 
-@pytest.mark.parametrize("to_html", PROCESSORS)
 class TestPagerComponentExample:
     @dataclass
     class Pager:
@@ -1938,7 +1873,7 @@ class TestPagerComponentExample:
             parts.append(t"</div>")
             return Template(*chain.from_iterable(parts))
 
-    def test_example(self, to_html):
+    def test_example(self):
         def paginate_url(page: int) -> str:
             return f"/pages?page={page}"
 
@@ -1949,7 +1884,7 @@ class TestPagerComponentExample:
             left_pages=(1, 2), page=3, right_pages=(4, 5), next_page=6, prev_page=None
         )
         content_t = t"<{Footer} pager={pager} paginate_url={paginate_url} />"
-        res = to_html(content_t)
+        res = html(content_t)
         print(res)
         assert (
             res
@@ -1960,8 +1895,7 @@ class TestPagerComponentExample:
 @pytest.mark.skip(
     "SVG+MATHML: This needs ns context for case correcting tags and attributes."
 )
-@pytest.mark.parametrize("to_html", PROCESSORS)
-def test_mathml(to_html):
+def test_mathml():
     num = 1
     denom = 3
     mathml_t = t"""<p>
@@ -1974,7 +1908,7 @@ def test_mathml(to_html):
   </math>
   is not a decimal number.
 </p>"""
-    res = to_html(mathml_t)
+    res = html(mathml_t)
     assert (
         str(res)
         == """<p>
@@ -1993,15 +1927,14 @@ def test_mathml(to_html):
 @pytest.mark.skip(
     "SVG+MATHML: This needs ns context for case correcting tags and attributes."
 )
-@pytest.mark.parametrize("to_html", PROCESSORS)
-def test_svg(to_html):
+def test_svg():
     cx, cy, r, fill = 150, 100, 80, "green"
     svg_t = t"""<svg version="1.1" width="300" height="200" xmlns="http://www.w3.org/2000/svg">
   <rect width="100%" height="100%" fill="red" />
   <circle cx={cx} cy={cy} r={r} fill={fill} />
   <text x="150" y="125" font-size="60" text-anchor="middle" fill="white">SVG</text>
 </svg>"""
-    res = to_html(svg_t)
+    res = html(svg_t)
     assert (
         res
         == """<svg version="1.1" width="300" height="200" xmlns="http://www.w3.org/2000/svg">
@@ -2013,15 +1946,14 @@ def test_svg(to_html):
 
 
 @pytest.mark.skip("SVG+MATHML: This needs ns context for closing empty tags.")
-@pytest.mark.parametrize("to_html", PROCESSORS)
-def test_svg_self_closing_empty_elements(to_html):
+def test_svg_self_closing_empty_elements():
     cx, cy, r, fill = 150, 100, 80, "green"
     svg_t = t"""<svg width="300" height="200">
   <rect width="100%" height="100%" fill="red" />
   <circle cx={cx} cy={cy} r={r} fill={fill} />
   <text x="150" y="125" font-size="60" text-anchor="middle" fill="white">SVG</text>
 </svg>"""
-    res = to_html(svg_t)
+    res = html(svg_t)
     assert (
         res
         == """<svg width="300" height="200">

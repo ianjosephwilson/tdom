@@ -25,11 +25,12 @@ from .htmlspec import (
     CDATA_CONTENT_ELEMENTS,
     DEFAULT_NORMAL_TEXT_ELEMENT,
     RCDATA_CONTENT_ELEMENTS,
+    SVG_ATTR_FIX,
+    SVG_TAG_FIX,
     VOID_ELEMENTS,
 )
 from .parser import (
     HTMLAttribute,
-    HTMLAttributesDict,
     TAttribute,
     TComment,
     TComponent,
@@ -365,18 +366,21 @@ def _resolve_t_attrs(
     return new_attrs
 
 
-def _resolve_html_attrs(attrs: AttributesDict) -> HTMLAttributesDict:
+def _resolve_html_attrs(attrs: AttributesDict) -> Iterable[HTMLAttribute]:
     """Resolve attribute values for HTML output."""
-    html_attrs: HTMLAttributesDict = {}
     for key, value in attrs.items():
         match value:
             case True:
-                html_attrs[key] = None
+                yield key, None
             case False | None:
                 pass
             case _:
-                html_attrs[key] = str(value)
-    return html_attrs
+                yield key, str(value)
+
+
+def _fix_svg_attrs(html_attrs: Iterable[HTMLAttribute]) -> Iterable[HTMLAttribute]:
+    for k, v in html_attrs:
+        yield SVG_ATTR_FIX.get(k, k), v
 
 
 def _kebab_to_snake(name: str) -> str:
@@ -422,13 +426,10 @@ class EndTag:
 
 
 def serialize_html_attrs(
-    html_attrs: HTMLAttributesDict, escape: Callable = default_escape_html_text
+    html_attrs: Iterable[HTMLAttribute], escape: Callable = default_escape_html_text
 ) -> str:
     return "".join(
-        (
-            f' {k}="{escape(v)}"' if v is not None else f" {k}"
-            for k, v in html_attrs.items()
-        )
+        (f' {k}="{escape(v)}"' if v is not None else f" {k}" for k, v in html_attrs)
     )
 
 
@@ -482,10 +483,8 @@ type RawTextInexactInterpolationValue = None | str | object
 
 @dataclass(frozen=True)
 class ParserService:
-    svg_context: bool = False
-
     def to_tnode(self, template: Template) -> TNode:
-        return TemplateParser.parse(template, svg_context=self.svg_context)
+        return TemplateParser.parse(template)
 
 
 @dataclass(frozen=True)
@@ -583,8 +582,15 @@ class ProcessorService(BaseProcessorService):
                     if res is not None:
                         yield res
                 case TElement(tag, attrs, children):
-                    bf.append(f"<{tag}")
-                    our_ctx = last_ctx.copy(parent_tag=tag)
+                    if tag == "svg":
+                        our_ctx = last_ctx.copy(parent_tag=tag, ns="svg")
+                    else:
+                        our_ctx = last_ctx.copy(parent_tag=tag)
+                    if our_ctx.ns == "svg":
+                        endtag = starttag = SVG_TAG_FIX.get(tag, tag)
+                    else:
+                        endtag = starttag = tag
+                    bf.append(f"<{starttag}")
                     if attrs:
                         self._process_attrs(bf, template, our_ctx, attrs)
                     # @TODO: How can we tell if we write out children or not in
@@ -594,7 +600,7 @@ class ProcessorService(BaseProcessorService):
                     else:
                         bf.append(">")
                     if tag not in VOID_ELEMENTS:
-                        q.append((last_ctx, EndTag(f"</{tag}>")))
+                        q.append((last_ctx, EndTag(f"</{endtag}>")))
                         q.extend([(our_ctx, child) for child in reversed(children)])
                 case TText(ref):
                     if last_ctx.parent_tag is None:
@@ -648,7 +654,12 @@ class ProcessorService(BaseProcessorService):
         attrs: tuple[TAttribute, ...],
     ) -> None:
         resolved_attrs = _resolve_t_attrs(attrs, template.interpolations)
-        attrs_str = serialize_html_attrs(_resolve_html_attrs(resolved_attrs))
+        if last_ctx.ns == "svg":
+            attrs_str = serialize_html_attrs(
+                _fix_svg_attrs(_resolve_html_attrs(resolved_attrs))
+            )
+        else:
+            attrs_str = serialize_html_attrs(_resolve_html_attrs(resolved_attrs))
         if attrs_str:
             bf.append(attrs_str)
 
@@ -695,7 +706,7 @@ class ProcessorService(BaseProcessorService):
             and not isinstance(result_t, Template)
             and callable(result_t)
         ):
-            component_obj = result_t
+            component_obj = cast(ComponentObjectProto, result_t)  # ty: ignore[redundant-cast]
             result_t = component_obj()
         else:
             component_obj = None
@@ -826,6 +837,7 @@ def resolve_text_without_recursion(
     """
     if content_ref.is_singleton:
         value = format_interpolation(template.interpolations[content_ref.i_indexes[0]])
+        value = cast(RawTextExactInterpolationValue, value)  # ty: ignore[redundant-cast]
         if value is None:
             return None
         elif isinstance(value, str):
@@ -848,6 +860,7 @@ def resolve_text_without_recursion(
                     text.append(part)
                 continue
             value = format_interpolation(template.interpolations[part])
+            value = cast(RawTextInexactInterpolationValue, value)  # ty: ignore[redundant-cast]
             if value is None:
                 continue
             elif (
@@ -922,21 +935,7 @@ def cached_processor_service_factory(**config_kwargs):
     return ProcessorService(parser_api=CachedParserService(), **config_kwargs)
 
 
-def svg_processor_service_factory(**config_kwargs):
-    return ProcessorService(parser_api=ParserService(svg_context=True), **config_kwargs)
-
-
-def cached_svg_processor_service_factory(**config_kwargs):
-    return ProcessorService(
-        parser_api=CachedParserService(svg_context=True), **config_kwargs
-    )
-
-
 _default_processor_api = cached_processor_service_factory(
-    slash_void=True, uppercase_doctype=True
-)
-
-_default_svg_processor_api = cached_svg_processor_service_factory(
     slash_void=True, uppercase_doctype=True
 )
 
@@ -946,13 +945,13 @@ _default_svg_processor_api = cached_svg_processor_service_factory(
 # --------------------------------------------------------------------------
 
 
-def to_html(template: Template, assume_ctx: ProcessContext | None = None) -> str:
+def html(template: Template, assume_ctx: ProcessContext | None = None) -> str:
     """Parse an HTML t-string, substitute values, and return a string of HTML."""
     return _default_processor_api.process_template(template, assume_ctx)
 
 
-def to_svg(template: Template) -> str:
-    """Parse a standalone SVG fragment and return a tree of Nodes.
+def svg(template: Template, assume_ctx: ProcessContext | None = None) -> str:
+    """Parse a standalone SVG fragment and return a string of HTML.
 
     Use when the template does not contain an ``<svg>`` wrapper element.
     Tag and attribute case-fixing (e.g. ``clipPath``, ``viewBox``) are applied
@@ -961,4 +960,6 @@ def to_svg(template: Template) -> str:
     When the template does contain ``<svg>``, use ``html()`` — the SVG context
     is detected automatically.
     """
-    return _default_svg_processor_api.process_template(template, make_ctx(ns="svg"))
+    if assume_ctx is None:
+        assume_ctx = make_ctx(parent_tag=DEFAULT_NORMAL_TEXT_ELEMENT, ns="svg")
+    return html(template, assume_ctx)
