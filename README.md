@@ -376,9 +376,10 @@ One particularly useful pattern is to build class-based components with
 dataclasses:
 
 ```python
+from string.templatelib import Template
 from dataclasses import dataclass, field
 from typing import Any, Iterable
-from tdom import Node, html
+from tdom import html
 
 @dataclass
 class Card:
@@ -418,7 +419,8 @@ syntax as HTML. You can create inline SVG graphics by simply including SVG tags
 in your templates:
 
 <!-- invisible-code-block: python
-from tdom import html, Node
+from string.templatelib import Template
+from tdom import html
 -->
 
 ```python

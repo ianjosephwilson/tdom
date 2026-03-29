@@ -8,7 +8,7 @@ Let's start with the simplest form of templating: just a string, no tags, no
 attributes:
 
 <!-- invisible-code-block: python
-from tdom import html, Element, Text
+from tdom import html
 -->
 
 ```python
