@@ -1,5 +1,6 @@
 import typing as t
 from collections.abc import Callable, Iterable, Sequence
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from functools import lru_cache
 from string.templatelib import Interpolation, Template
@@ -45,7 +46,7 @@ from .parser import (
     TTemplatedAttribute,
     TText,
 )
-from .protocols import HasHTMLDunder
+from .protocols import ComponentContextProvider, ComponentObject, HasHTMLDunder
 from .sentinel import NOT_SET, NotSet
 from .template_utils import TemplateRef
 from .utils import CachableTemplate, LastUpdatedOrderedDict
@@ -463,7 +464,6 @@ class ProcessContext:
 type FunctionComponent = Callable[..., Template]
 type FactoryComponent = Callable[..., ComponentObject]
 type ComponentCallable = FunctionComponent | FactoryComponent
-type ComponentObject = Callable[[], Template]
 
 
 type NormalTextInterpolationValue = (
@@ -716,7 +716,7 @@ class ProcessorService:
             _resolve_t_attrs(attrs, template.interpolations),
             children=children_template,
         )
-
+        cvar_values: tuple[tuple[ContextVar, object], ...] = ()
         result_t = component_callable(**kwargs)
         if (
             result_t is not None
@@ -724,6 +724,8 @@ class ProcessorService:
             and callable(result_t)
         ):
             component_obj = t.cast(ComponentObject, result_t)  # ty: ignore[redundant-cast]
+            if isinstance(component_obj, ComponentContextProvider):
+                cvar_values = component_obj.get_context_values()
             result_t = component_obj()
         else:
             component_obj = None
@@ -734,7 +736,8 @@ class ProcessorService:
                 return ""
             else:
                 result_root = self.parser_api.to_tnode(result_t)
-                return self._process_tnode(result_t, last_ctx, result_root)
+                with ContextVarSetter(context_values=cvar_values):
+                    return self._process_tnode(result_t, last_ctx, result_root)
         else:
             raise TypeError(f"Unknown component return value: {type(result_t)}")
 
@@ -960,6 +963,34 @@ def cached_processor_service_factory(**config_kwargs):
 _default_processor_api = cached_processor_service_factory(
     slash_void=True, uppercase_doctype=True
 )
+
+
+class ContextVarSetter:
+    """
+    Context manager for working with many context vars (instead of only 1).
+
+    This is meant to be created, used immediately and then discarded.
+
+    This allows for dynamically specifying a tuple of var / value pairs that
+    another part of the program can use to wrap some called code without knowing
+    anything about either.
+    """
+
+    context_values: tuple[tuple[ContextVar, object], ...]  # Cvar / value pair.
+    tokens: tuple[Token, ...]
+
+    def __init__(self, context_values=()):
+        self.context_values = context_values
+        self.tokens = ()
+
+    def __enter__(self):
+        """Set every given context var to its paired value."""
+        self.tokens = tuple(var.set(val) for var, val in self.context_values)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """Reset every given context var."""
+        for idx, var_value in enumerate(self.context_values):
+            var_value[0].reset(self.tokens[idx])
 
 
 # --------------------------------------------------------------------------
