@@ -303,6 +303,10 @@ def _resolve_t_attrs(
 
     The values returned are not yet processed for HTML output; that is handled
     in a later step.
+
+    @NOTE: We "touch" the key when accumulating values so that we can predict
+    what order that attribute will be ordered.  We skip this step when setting
+    the final value so that the order is not disturbed.
     """
     new_attrs: AttributesDict = LastUpdatedOrderedDict()
     attr_accs: dict[str, AttributeValueAccumulator] = {}
@@ -361,7 +365,8 @@ def _resolve_t_attrs(
             case _:
                 raise ValueError(f"Unknown TAttribute type: {type(attr).__name__}")
     for acc_name, acc in attr_accs.items():
-        new_attrs[acc_name] = acc.to_value()
+        # Skip "touching" the key here so that the order remains intact.
+        super(type(new_attrs), new_attrs).__setitem__(acc_name, acc.to_value())
     return new_attrs
 
 
@@ -398,8 +403,6 @@ def _prep_component_kwargs(
         attrs even if they are not specified in the component's `attrs` in
         the template. If an attribute with the same name is provided in
         `attrs` then it takes priority over entries in `provided_attrs`.
-        @NOTE: These will be injected into any component with `**kwargs`
-        in their signature unless provided already by `attrs`.
 
     `raise_on_requires_positional`:
         Optionally check and raise `TypeError` if the `callable_info` requires
@@ -428,15 +431,15 @@ def _prep_component_kwargs(
         snake_name = _kebab_to_snake(attr_name)
         if snake_name in callable_info.named_params or callable_info.kwargs:
             kwargs[snake_name] = attr_value
+        else:
+            raise ValueError(f"Unexpected attribute {snake_name}.")
 
-    if "children" in callable_info.named_params or callable_info.kwargs:
+    if "children" in callable_info.named_params:
         kwargs["children"] = children
 
     # Add in provided attrs if they haven't been set already and are wanted.
     for pattr_name, pattr_value in provided_attrs:
-        if pattr_name not in kwargs and (
-            pattr_name in callable_info.named_params or callable_info.kwargs
-        ):
+        if pattr_name not in kwargs and pattr_name in callable_info.named_params:
             kwargs[pattr_name] = pattr_value
 
     # Check to make sure we've fully satisfied the callable's requirements
