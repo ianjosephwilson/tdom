@@ -354,8 +354,7 @@ from string.templatelib import Template
 from typing import Any
 from tdom import html
 
-def Link(*, href: str, text: str, data_value: int, children: Template = t'', **attrs: Any) -> Template:
-    # Children are ignored.
+def Link(*, href: str, text: str, data_value: int, **attrs: Any) -> Template:
     return t'<a href="{href}" {attrs}>{text}: {data_value}</a>'
 
 result = html(t'<{Link} href="https://example.com" text="Example" data-value={42} target="_blank" />')
