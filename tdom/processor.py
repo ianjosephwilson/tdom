@@ -621,7 +621,7 @@ class ComponentProcessor(IComponentProcessor):
             return res1
         elif callable(res1):
             res2 = res1()  # ty: ignore[call-top-callable]
-            if isinstance(res2, Template):
+            if isinstance(res2, (Template, ScopedTemplate)):
                 return res2
             else:
                 raise TypeError(
