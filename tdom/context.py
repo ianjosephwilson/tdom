@@ -59,6 +59,7 @@ from string.templatelib import Template
 __all__ = [
     "Context",
     "Scope",
+    "ScopeProvider",
     "ScopedTemplate",
     "create_context",
     "make_provider",
@@ -198,3 +199,15 @@ def create_context[T](
     """
     cv: ContextVar[T] = ContextVar(name, default=default)
     return Context(cv)
+
+
+@dataclass(frozen=True, slots=True)
+class ScopeProvider[T]:
+    children: Template
+    cvar: ContextVar[T]
+    cvalue: T
+
+    def __call__(self) -> ScopedTemplate:
+        return ScopedTemplate(
+            template=self.children, scope=Scope(cv=self.cvar, value=self.cvalue)
+        )
