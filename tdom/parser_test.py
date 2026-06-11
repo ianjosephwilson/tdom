@@ -95,6 +95,12 @@ def test_parse_void_element():
     assert node == TElement("br")
 
 
+def test_parse_void_element_with_optional_solidus():
+    for el in (t"<br/>", t"<br />"):
+        node = TemplateParser.parse(el)
+        assert node == TElement("br")
+
+
 def test_parse_uppercase_void_element():
     node = TemplateParser.parse(t"<BR>")
     assert node == TElement("br")
@@ -217,36 +223,25 @@ def test_parse_unexpected_closing_tag():
         _ = TemplateParser.parse(t"Unopened</div>")
 
 
-@pytest.mark.skip()
-def test_self_closing_tags():
-    node = TemplateParser.parse(t"<div/><p></p>")
-    assert node == TFragment(
-        children=(
-            TElement("div"),
-            TElement("p"),
-        )
-    )
+def test_self_invalid_self_closing_tags():
+    with pytest.raises(ValueError, match="Self-closing tags are only supported for"):
+        _ = TemplateParser.parse(t"<div/><p></p>")
 
 
-@pytest.mark.skip(reason='Update self-closing rules.')
-def test_nested_self_closing_tags():
-    node = TemplateParser.parse(t"<div><br><div /><br></div>")
-    assert node == TElement(
-        "div", children=(TElement("br"), TElement("div"), TElement("br"))
-    )
-    node = TemplateParser.parse(t"<div><div /></div>")
-    assert node == TElement("div", children=(TElement("div"),))
+def test_nested_invalid_self_closing_tags():
+    with pytest.raises(ValueError, match="Self-closing tags are only supported for"):
+        _ = TemplateParser.parse(t"<div><br><div /><br></div>")
+    with pytest.raises(ValueError, match="Self-closing tags are only supported for"):
+        _ = TemplateParser.parse(t"<div><div /></div>")
 
 
-@pytest.mark.skip(reason='Update self-closing rules.')
 def test_self_closing_tags_unexpected_closing_tag():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Self-closing tags are only supported for"):
         _ = TemplateParser.parse(t"<div /></div>")
 
 
-@pytest.mark.skip(reason='Update self-closing rules.')
 def test_self_closing_void_tags_unexpected_closing_tag():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Unexpected closing tag"):
         _ = TemplateParser.parse(t"<input /></input>")
 
 
@@ -273,6 +268,11 @@ def test_literal_attrs():
         ),
         children=(TText.literal("Link"),),
     )
+
+
+def test_void_element_with_attr_value_endswith_solidus():
+    node = TemplateParser.parse(t"<img src=/>")
+    assert node == TElement("img", attrs=(TLiteralAttribute("src", "/"),))
 
 
 def test_literal_attr_entities():
@@ -637,57 +637,32 @@ class TestAmbiguousSelfCloseCheck:
                 and isinstance(tnode.children[0], TComponent)
             )
 
-    def test_component_ambiguous_corrected(self, comp):
+    def test_component_ambiguous_error(self, comp):
         dynamic = "dynamic"
         for template in (
+            t"<{comp} title=literal/>",
             t"<{comp} title=literal/>abc",
+            t"<{comp} title={dynamic}/>",
             t"<{comp} title={dynamic}/>abc",
+            t"<{comp} title=prefix{dynamic}/>",
+            t"<{comp} title=prefix{dynamic}/>abc",
+            t"<{comp} title={dynamic}literal/>",
             t"<{comp} title={dynamic}literal/>abc",
             t"<{comp} title=/>abc",
             t"<{comp} title=     />abc",  # WS between = and value is ignored, so title=/
         ):
-            tnode = TemplateParser.parse(template)
-            assert (
-                isinstance(tnode, TFragment)
-                and len(tnode.children) == 2
-                and isinstance(tnode.children[0], TComponent)
-            )
+            with pytest.raises(
+                ValueError, match="Invalid HTML structure: unclosed tags remain"
+            ):
+                _ = TemplateParser.parse(template)
 
-    def test_component_ambiguous_corrected_attr_value_literal(self, comp):
-        tnode = TemplateParser.parse(t"<{comp} title=literal/>")
-        assert (
-            isinstance(tnode, TComponent)
-            and isinstance(tnode.attrs[-1], TLiteralAttribute)
-            and tnode.attrs[-1].value == "literal"
-        )
-
-    def test_component_ambiguous_corrected_attr_value_interpolated(self, comp):
-        dynamic = "dynamic"
-        tnode = TemplateParser.parse(t"<{comp} title={dynamic}/>")
-        assert (
-            isinstance(tnode, TComponent)
-            and isinstance(tnode.attrs[-1], TInterpolatedAttribute)
-            and tnode.attrs[-1].value_i_index == 1
-        )
-
-    def test_component_ambiguous_corrected_attr_value_templated(self, comp):
-        dynamic = "dynamic"
-        tnode = TemplateParser.parse(t"<{comp} title=prefix{dynamic}/>")
-        assert (
-            isinstance(tnode, TComponent)
-            and isinstance(tnode.attrs[-1], TTemplatedAttribute)
-            and tnode.attrs[-1].value_ref
-            == TemplateRef(strings=("prefix", ""), i_indexes=(1,))
-        )
-
-    @pytest.mark.skip(reason='Update self-closing rules.')
     def test_element_self_closing_error(self):
         dynamic = "dynamic"
         attrs = {"active": True}
         for template in (
             t"<div/>abc",
-            t"<div active/>abc",  # Still ok because attr name cannot contain /
-            t"<div {attrs}/>abc",  # Still ok because attr name cannot contain /
+            t"<div active/>abc",
+            t"<div {attrs}/>abc",
             t"<div />abc",
             t"<div title=literal />abc",
             t'<div title="literal"/>abc',
@@ -697,7 +672,6 @@ class TestAmbiguousSelfCloseCheck:
             t'<div title="{dynamic}literal"/>abc',
         ):
             with pytest.raises(
-                ValueError,
-                match="Self-closing xhtml style tags are only supported for components.",
+                ValueError, match="Self-closing tags are only supported"
             ):
                 _ = TemplateParser.parse(template)

@@ -2,9 +2,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from string.templatelib import Interpolation, Template
-from typing import Literal
 
-from .htmlspec import MATH_TAGS, SVG_TAGS, VOID_ELEMENTS
+from .htmlspec import MATH_TAGS, SVG_TAGS, VOID_ELEMENTS, NamespaceType
 from .placeholders import PlaceholderConfig, PlaceholderState
 from .template_utils import TemplateRef, combine_template_refs
 from .tnodes import (
@@ -28,6 +27,12 @@ type HTMLAttributesDict = dict[str, str | None]
 
 @dataclass
 class OpenTElement:
+    starttag_text: str
+    " Entire starttag as parsed, includes placeholders, used for debugging. "
+    raw_attrs: Sequence[HTMLAttribute]
+    " Attrs as parsed, includes placeholders, used for debugging. "
+    startend: bool
+    " Was parsed as startend tag, ie. <tag />, used for debugging. "
     tag: str
     attrs: tuple[TAttribute, ...]
     children: list[TNode] = field(default_factory=list)
@@ -40,6 +45,12 @@ class OpenTFragment:
 
 @dataclass
 class OpenTComponent:
+    starttag_text: str
+    " Entire starttag as parsed, includes placeholders, used for debugging. "
+    raw_attrs: Sequence[HTMLAttribute]
+    " Attrs as parsed, includes placeholders, used for debugging. "
+    startend: bool
+    " Was parsed as startend tag, ie. <tag />, used for debugging. "
     start_i_index: int
     children_start_s_index: int
     """The strings index where the component's children template starts."""
@@ -99,7 +110,27 @@ class SourceTracker:
 
 @dataclass
 class ParserPolicy:
-    self_closing_tags: set[str] = field(default_factory=lambda: SVG_TAGS | MATH_TAGS)
+    self_closing_tags: frozenset[str] = frozenset(SVG_TAGS | MATH_TAGS)
+    void_tags: frozenset[str] = VOID_ELEMENTS
+
+    def validate_self_close(self, ns: NamespaceType | None, tag: str) -> None:
+        if (
+            ns is None
+            and tag not in self.self_closing_tags
+            and tag not in self.void_tags
+        ):
+            # Don't self-close normal tags.
+            e = ValueError(
+                "Self-closing tags are only supported for components, void tags, svg tags or math tags in an ambigous namespace."
+            )
+            e.add_note(f"Cannot self-close {tag}.")
+            raise e
+        elif ns == "html" and tag not in self.void_tags:
+            e = ValueError(
+                "Self-closing tags are only supported for components and void tags in html."
+            )
+            e.add_note(f"Cannot self-close {tag}.")
+            raise e
 
 
 class TemplateParser(HTMLParser):
@@ -166,12 +197,20 @@ class TemplateParser(HTMLParser):
     # Tag Helpers
     # ------------------------------------------
 
-    def make_open_tag(self, tag: str, attrs: Sequence[HTMLAttribute]) -> OpenTag:
+    def make_open_tag(
+        self, tag: str, attrs: Sequence[HTMLAttribute], startend: bool = False
+    ) -> OpenTag:
         """Build an OpenTag from a raw tag and attribute tuples."""
         tag_ref = self.placeholders.remove_placeholders(tag)
 
         if tag_ref.is_literal:
-            return OpenTElement(tag=tag, attrs=self.make_tattrs(attrs))
+            return OpenTElement(
+                starttag_text=self.always_get_starttag_text(),
+                raw_attrs=attrs,
+                startend=startend,
+                tag=tag,
+                attrs=self.make_tattrs(attrs),
+            )
 
         if not tag_ref.is_singleton:
             raise ValueError(
@@ -210,6 +249,9 @@ class TemplateParser(HTMLParser):
         )
 
         return OpenTComponent(
+            starttag_text=starttag_text,
+            raw_attrs=attrs,
+            startend=startend,
             start_i_index=i_index,
             children_start_s_index=children_start_s_index,
             offset_into_children_start_s=offset_into_children_start_s,
@@ -394,42 +436,16 @@ class TemplateParser(HTMLParser):
     # ------------------------------------------
 
     def handle_starttag(self, tag: str, attrs: Sequence[HTMLAttribute]) -> None:
-        # An unquoted attribute value within a self-closing tag can consume
-        # the "/" as part of the attribute's value if not separated by whitespace.
-        # This is the CORRECT behavior but can can be especially confusing if
-        # preceded by an interpolation, such as `<{Comp} name={value}/>`.
-        # We correct this usage by removing the / from the last attr's value
-        # and treating the tag as self-closing.
-        # This applies to all components and any tags that *could* self close
-        # in the current namespace.
-        if (
-            self.always_get_starttag_text().endswith("/>")
-            and len(attrs) > 0
-            and isinstance(attrs[-1][1], str)  # attr is not boolean
-            and attrs[-1][1][-1] == "/"  # attr value ends with /
-        ):
-            should_self_close = False
-            if not self.placeholders.copy().remove_placeholders(tag).is_literal:
-                should_self_close = True  # Components
-            else:
-                ns = self.get_current_ns()
-                if (ns is None and tag in self.policy.self_closing_tags) or ns in (
-                    "svg",
-                    "math",
-                ):
-                    should_self_close = True
-            if should_self_close:
-                return self.handle_startendtag(
-                    tag, (*attrs[:-1], (attrs[-1][0], attrs[-1][1][:-1]))
-                )
         open_tag = self.make_open_tag(tag, attrs)
-        if isinstance(open_tag, OpenTElement) and open_tag.tag in VOID_ELEMENTS:
+        # @TODO: Do we need to check a NS here?
+        # As long as void tags can't be svg/math tags then this could not happen...
+        if isinstance(open_tag, OpenTElement) and open_tag.tag in self.policy.void_tags:
             final_tag = self.finalize_tag(open_tag)
             self.append_child(final_tag)
         else:
             self.stack.append(open_tag)
 
-    def get_current_ns(self) -> None | Literal["html", "math", "svg"]:
+    def get_current_ns(self) -> None | NamespaceType:
         for container in reversed(self.stack):
             if isinstance(container, OpenTElement) and container.tag == "svg":
                 return "svg"
@@ -448,21 +464,16 @@ class TemplateParser(HTMLParser):
                 return None  # Unknown
         return None  # Unknown
 
+    def is_literal_tag(self, tag: str):
+        return self.placeholders.copy().remove_placeholders(tag).is_literal
+
     def handle_startendtag(self, tag: str, attrs: Sequence[HTMLAttribute]) -> None:
         """Dispatch a self-closing tag, `<tag />` to specialized handlers."""
-        if self.placeholders.copy().remove_placeholders(tag).is_literal:
+        if self.is_literal_tag(tag):
             ns = self.get_current_ns()
-            if ns is None and tag not in self.policy.self_closing_tags:
-                # Don't self-close normal tags.
-                raise ValueError(
-                    "Self-closing xhtml style tags are only supported for components, svg tags or math tags."
-                )
-            elif ns == "html":
-                raise ValueError(
-                    "Self-closing xhtml style tags are only supported for components in HTML."
-                )
+            self.policy.validate_self_close(ns, tag)
 
-        open_tag = self.make_open_tag(tag, attrs)
+        open_tag = self.make_open_tag(tag, attrs, startend=True)
         final_tag = self.finalize_tag(open_tag)
         self.append_child(final_tag)
 
@@ -515,6 +526,22 @@ class TemplateParser(HTMLParser):
         self.policy = ParserPolicy()
         self.source = None
 
+    def has_ambiguous_forward_slash(self, open_tag: OpenTag) -> bool:
+        if isinstance(open_tag, (OpenTElement, OpenTComponent)):
+            return (
+                # has attributes
+                len(open_tag.raw_attrs) > 0
+                # last attr not bare attribute
+                and open_tag.raw_attrs[-1][1] is not None
+                # last char of last attr is "/"
+                and open_tag.raw_attrs[-1][1][-1] == "/"
+                # parsed starttag ends with "/>"
+                and open_tag.starttag_text.endswith("/>")
+                # if parsed as startend then its not ambiguous
+                and not open_tag.startend
+            )
+        return False
+
     def close(self) -> None:
         if self.waiting_for_data():
             # We apply heuristics here to try to guess why the parser didn't finish.
@@ -527,7 +554,25 @@ class TemplateParser(HTMLParser):
                     "Parser expects more data, is the template valid html?"
                 )
         if self.stack:
-            raise ValueError("Invalid HTML structure: unclosed tags remain.")
+            # Check for tags that might have meant to self-close but whose
+            # unquoted last attribute value consumed a "/", ie. <div id=app/>.
+            parent = self.stack[-1]
+            if isinstance(parent, OpenTElement):
+                starttag = parent.tag
+            elif isinstance(parent, OpenTComponent):
+                starttag = (
+                    f"{{{self.get_source().format_starttag(parent.start_i_index)}}}"
+                )
+            else:
+                starttag = None
+            e = ValueError("Invalid HTML structure: unclosed tags remain.")
+            if starttag and self.has_ambiguous_forward_slash(parent):
+                e.add_note(
+                    f'Did you mean to quote the last attribute or put a space before "/>" for "<{starttag} .../>"?'
+                )
+            elif starttag:
+                e.add_note(f"Most recently unclosed tag is <{starttag} ...>")
+            raise e
         if not self.placeholders.is_empty:
             raise ValueError("Some placeholders were never resolved.")
         super().close()
