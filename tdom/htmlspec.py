@@ -1,3 +1,5 @@
+from typing import Literal
+
 # See https://developer.mozilla.org/en-US/docs/Glossary/Void_element
 VOID_ELEMENTS = frozenset(
     [
@@ -231,3 +233,6 @@ MATH_TAGS = {
     "munderover",
     "semantics",
 }
+
+
+type NamespaceType = Literal["html", "math", "svg"]
