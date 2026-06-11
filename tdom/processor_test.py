@@ -1900,8 +1900,12 @@ def test_process_template_internal_cache():
     # miss the cache.  If this element is used elsewhere than the global
     # cache might cache it and it will ruin our counting, specifically
     # the first miss will instead be a hit.
-    sample_t = t"<div>{'content'}<tdom-cache-test-element></tdom-cache-test-element></div>"
-    sample_diff_t = t"<div>{'diffcontent'}<tdom-cache-test-element></tdom-cache-test-element></div>"
+    sample_t = (
+        t"<div>{'content'}<tdom-cache-test-element></tdom-cache-test-element></div>"
+    )
+    sample_diff_t = (
+        t"<div>{'diffcontent'}<tdom-cache-test-element></tdom-cache-test-element></div>"
+    )
     alt_t = t"<span>{'content'}</span>"
     process_api = TemplateProcessor(parser_api=TemplateParserProxy())
     cached_process_api = TemplateProcessor(parser_api=CachedTemplateParserProxy())
