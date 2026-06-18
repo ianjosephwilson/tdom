@@ -58,6 +58,7 @@ class PlaceholderConfig:
 @dataclass
 class PlaceholderState:
     known: set[int] = field(default_factory=set)
+    "Current set of known placeholders."
     config: PlaceholderConfig = field(default_factory=make_placeholder_config)
     """Collection of currently 'known and active' placeholder indexes."""
 
@@ -72,6 +73,22 @@ class PlaceholderState:
         placeholder = self.config.make_placeholder(index)
         self.known.add(index)
         return placeholder
+
+    def measure_placeholder(self, index: int) -> int:
+        return len(self.config.make_placeholder(index))
+
+    def try_remove_placeholders(self, text: str) -> TemplateRef:
+        """
+        Like `remove_placeholders` but does not permenantly remove the placeholders
+        from the known placeholders.
+        """
+        pt = self.config.find_placeholders(text)
+        known = self.known.copy()
+        for index in pt.i_indexes:
+            if index not in known:
+                raise ValueError(f"Unknown placeholder index {index} found in text.")
+            known.remove(index)
+        return pt
 
     def remove_placeholders(self, text: str) -> TemplateRef:
         """

@@ -89,6 +89,16 @@ type TNodeContainer = TComponent | TElement | TFragment
 " Alias for union of tnodes that have children. "
 
 
+@dataclass(slots=True)
+class Position:
+    "A position in a block of source code."
+
+    line: int = 1
+    " Line of code, starts at 1. "
+    offset: int = 0
+    " Offset from the start of the line, starts at 0. "
+
+
 @dataclass
 class SourceTracker:
     """Tracks source locations within a Template for error reporting."""
@@ -105,6 +115,149 @@ class SourceTracker:
     tag_closings: dict[TNodeContainer, TagClosing] = field(default_factory=dict)
 
     tag_openings: dict[OpenTag, TagOpening] = field(default_factory=dict)
+
+    placeholders: PlaceholderState = field(default_factory=lambda: PlaceholderState())
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.i_index < self.s_index:
+            # Advance into the next interpolation UNLESS the last string
+            # we returned was at the end of the template.
+            if self.s_index == len(self.template.strings) - 1:
+                raise StopIteration
+            self.i_index += 1
+            return self.placeholders.add_placeholder(self.i_index)
+        elif self.i_index == self.s_index:
+            # Advance into the next string
+            self.s_index += 1
+            return self.template.strings[self.s_index]
+        else:
+            raise AssertionError("{self.i_index=} should not exceed {self.s_index=}")
+
+    def to_template_pos(self, parser_pos: Position) -> Position:
+        """
+        Translate the given parser (pos)ition into template (pos)ition.
+
+        @NOTE: There can be newlines in an interpolation expression which
+        results in the parser position's line being less than the
+        template position's line since a placeholder will not contain newlines.
+
+        @NOTE: Similarly an interpolation as displayed can be longer than a
+        placeholder OR shorter than a placeholder causing the offsets to go
+        out of sync.
+
+        @NOTE: There is a weird issue with `format_spec` and the specification
+        where you can't tell if a ':' was used or not when the `format_spec` is
+        empty.  We just assume no one would leave it in without a non-empty
+        format_spec, ie. t"{val:}" would not exist even though it is valid. The
+        conversion does not have this issue because "{val!}" is invalid and when
+        no conversion is set the conversion value is None.
+        """
+        #
+        # Walk until we reach the given parser pos, keeping both parser position
+        # and template position in sync.  When the given parser position is reached
+        # then return the synced up template position.
+        #
+        pos = Position()
+        tpos = Position()
+        last_s_index = len(self.template.strings) - 1
+        for s_index in range(len(self.template.strings)):
+            #
+            # Walk through `strings[s_index]`
+            #
+            s = self.template.strings[s_index]
+            if parser_pos.line > pos.line:
+                # need more lines
+                nls_found = s.count("\n")  # how many were found?
+                nls_need = parser_pos.line - pos.line  # how many are needed?
+                if nls_found >= nls_need:
+                    pos.line += nls_need
+                    tpos.line += nls_need
+                    offset_found = len(s.split("\n", nls_need + 1)[nls_need])
+                    if offset_found >= parser_pos.offset:
+                        # needed lines, found lines, found offset
+                        tpos.offset = pos.offset = parser_pos.offset
+                        return tpos
+                    else:
+                        # got enough lines, still need more offset
+                        tpos.offset = pos.offset = offset_found
+                elif nls_found > 0:
+                    # some lines but still need more lines
+                    pos.line += nls_found
+                    tpos.line += nls_found
+                    tpos.offset = pos.offset = len(s[s.rfind("\n") + 1 :])
+                else:
+                    # no lines, still need more lines
+                    offset_found = len(s)
+                    tpos.offset += offset_found
+                    pos.offset += offset_found
+            elif parser_pos.line == pos.line:
+                # got enough lines, we just need more offset
+                offset_found = len(s[: s.find("\n")]) if "\n" in s else len(s)
+                offset_need = parser_pos.offset - pos.offset
+                if offset_found >= offset_need:
+                    pos.offset += offset_need
+                    tpos.offset += offset_need
+                    # had lines, found offset
+                    return tpos
+                else:
+                    tpos.offset += offset_found
+                    pos.offset += offset_found
+            else:
+                # We should have dropped out and failed earlier this would be a bug.
+                raise AssertionError(
+                    f"Unexpected line: {pos.line} greater than asked for {parser_pos.line}"
+                )
+
+            #
+            # Walk through `interpolations[s_index]`
+            #
+            if s_index < last_s_index:
+                ph_length = self.placeholders.measure_placeholder(s_index)
+                if (
+                    pos.line == parser_pos.line
+                    and pos.offset + ph_length > parser_pos.offset
+                ):
+                    # Ie. we don't know how to determine how much of the
+                    # interpolation expression would be equivalent to
+                    # a substring of a placeholder.
+                    raise ValueError(
+                        f"Cannot split a placeholder for interpolations[{s_index}], placeholders are atomic."
+                    )
+
+                ip = self.template.interpolations[s_index]
+                expr = ip.expression
+                expr_line_count = expr.count("\n")
+                tpos.line += expr_line_count
+                pos.offset += ph_length
+                EXCLAIMATION_POINT = CONVERSION_CHAR = SEMICOLON = LEFT_CURLY_BRACE = (
+                    RIGHT_CURLY_BRACE
+                ) = 1
+                tail = (
+                    (
+                        EXCLAIMATION_POINT + CONVERSION_CHAR
+                        if ip.conversion is not None
+                        else 0
+                    )  # "!" and conversion char or neither
+                    + (SEMICOLON if ip.format_spec else 0)  # ":" or not
+                    + len(ip.format_spec)
+                    + RIGHT_CURLY_BRACE
+                )
+                if expr_line_count > 0:
+                    tpos.offset = len(expr[expr.rfind("\n") + 1 :]) + tail
+                else:
+                    tpos.offset += LEFT_CURLY_BRACE + len(expr) + tail
+                if pos == parser_pos:
+                    return tpos
+        if pos == parser_pos:
+            # @TODO: When can this fall through happen? Or is this always an error?
+            return tpos
+        else:
+            raise ValueError(
+                "Unexpected position {pos}, did not reach required position {parser_pos}"
+            )
 
     def record_tag_opening(
         self,
@@ -171,9 +324,7 @@ class SourceTracker:
 class TemplateParser(HTMLParser):
     root: OpenTFragment
     stack: list[OpenTag]
-    placeholders: PlaceholderState
     source: SourceTracker | None
-    " Map from completed tnodes back to their opentag for error reporting. "
 
     def __init__(self, *, convert_charrefs: bool = True):
         # This calls HTMLParser.reset() which we override to set up our state.
@@ -197,12 +348,14 @@ class TemplateParser(HTMLParser):
 
     def make_tattr(self, attr: HTMLAttribute) -> TAttribute:
         """Build a TAttribute from a raw attribute tuple."""
-
+        source = self.get_source()
         name, value = attr
 
-        name_ref = self.placeholders.remove_placeholders(name)
+        name_ref = source.placeholders.remove_placeholders(name)
         value_ref = (
-            self.placeholders.remove_placeholders(value) if value is not None else None
+            source.placeholders.remove_placeholders(value)
+            if value is not None
+            else None
         )
 
         if name_ref.is_literal:
@@ -237,7 +390,7 @@ class TemplateParser(HTMLParser):
     ) -> OpenTag:
         """Build an OpenTag from a raw tag and attribute tuples."""
         source = self.get_source()
-        tag_ref = self.placeholders.remove_placeholders(tag)
+        tag_ref = source.placeholders.remove_placeholders(tag)
         if tag_ref.is_literal:
             open_tag = OpenTElement(
                 tag=tag,
@@ -283,7 +436,7 @@ class TemplateParser(HTMLParser):
         offset_into_children_start_s = self.compute_offset_into_children_start_s(
             start_i_index=i_index,
             tattrs=tattrs,
-            config=self.placeholders.config,
+            config=source.placeholders.config,
             starttag_text=starttag_text,
         )
 
@@ -433,7 +586,7 @@ class TemplateParser(HTMLParser):
     def validate_end_tag(self, tag: str, open_tag: OpenTag) -> int | None:
         """Validate that closing tag matches open tag. Return component end index if applicable."""
         source = self.get_source()
-        tag_ref = self.placeholders.remove_placeholders(tag)
+        tag_ref = source.placeholders.remove_placeholders(tag)
 
         match open_tag:
             case OpenTElement():
@@ -525,18 +678,42 @@ class TemplateParser(HTMLParser):
         final_tag = self.finalize_tag(open_tag)
         self.append_child(final_tag)
 
+    def get_parser_pos(self) -> Position:
+        """
+        Get the position of the parser.
+
+        The content will be the t-string but with the interpolations replaced
+        with placeholders.  Usually this is not very helpful and the position
+        in the template (t-string) itself is preferred but this can be used
+        to construct the template position.
+        """
+        line, offset = self.getpos()
+        return Position(line=line, offset=offset)
+
+    def get_template_pos_msg(self) -> str:
+        """
+        Get the position in the template as if it read as a t-string.
+
+        This can help find the locations of errors in the original t-string.
+        """
+        template_pos = self.get_source().to_template_pos(self.get_parser_pos())
+        return f"line {template_pos.line} offset {template_pos.offset}"
+
     def handle_endtag(self, tag: str) -> None:
         if not self.stack:
-            tag_ref = self.placeholders.copy().remove_placeholders(tag)
+            source = self.get_source()
+            tag_ref = source.placeholders.try_remove_placeholders(tag)
             if tag_ref.is_literal:
-                raise ValueError(f"Unexpected closing tag </{tag}> with no open tag.")
+                raise ValueError(
+                    f"Unexpected closing tag </{tag}> at {self.get_template_pos_msg()} with no open tag."
+                )
             if not tag_ref.is_singleton:
                 # @TODO: Also it doesn't match anything
                 raise ValueError(
                     "Component end tags must have exactly one interpolation."
                 )
             # Component tag endtag but no component tag is open...
-            unmatched_endtag = self.get_source().format_endtag(tag_ref.i_indexes[0])
+            unmatched_endtag = source.format_endtag(tag_ref.i_indexes[0])
             raise ValueError(
                 f"Unexpected closing component tag </{{{unmatched_endtag}}}> with no open tag."
             )
@@ -578,7 +755,8 @@ class TemplateParser(HTMLParser):
     # ------------------------------------------
 
     def handle_data(self, data: str) -> None:
-        ref = self.placeholders.remove_placeholders(data)
+        source = self.get_source()
+        ref = source.placeholders.remove_placeholders(data)
         parent = self.get_parent()
         if parent.children and isinstance(parent.children[-1], TText):
             parent.children[-1] = TText(
@@ -588,12 +766,14 @@ class TemplateParser(HTMLParser):
             self.append_child(TText(ref=ref))
 
     def handle_comment(self, data: str) -> None:
-        ref = self.placeholders.remove_placeholders(data)
+        source = self.get_source()
+        ref = source.placeholders.remove_placeholders(data)
         comment = TComment(ref)
         self.append_child(comment)
 
     def handle_decl(self, decl: str) -> None:
-        ref = self.placeholders.remove_placeholders(decl)
+        source = self.get_source()
+        ref = source.placeholders.remove_placeholders(decl)
         if not ref.is_literal:
             raise ValueError("Interpolations are not allowed in declarations.")
         elif decl.upper().startswith("DOCTYPE "):
@@ -609,10 +789,10 @@ class TemplateParser(HTMLParser):
         super().reset()
         self.root = OpenTFragment()
         self.stack = []
-        self.placeholders = PlaceholderState()
         self.source = None
 
     def close(self) -> None:
+        source = self.get_source()
         if self.waiting_for_data():
             # We apply heuristics here to try to guess why the parser didn't finish.
             if self.rawdata.count('"') % 2 == 1 or self.rawdata.count("'") % 2 == 1:
@@ -624,7 +804,6 @@ class TemplateParser(HTMLParser):
                     "Parser expects more data, is the template valid html?"
                 )
         if self.stack:
-            source = self.get_source()
             e = ValueError("Invalid HTML structure: unclosed tags remain.")
             # @TODO: We need to determine which tags this might apply to,
             # this only applies to components.
@@ -665,7 +844,7 @@ class TemplateParser(HTMLParser):
                                 f'Did you mean to quote the last attribute or put a space before "/>" for "<{{{starttag}}} .../>"?'
                             )
             raise e
-        if not self.placeholders.is_empty:
+        if not source.placeholders.is_empty:
             raise ValueError("Some placeholders were never resolved.")
         super().close()
 
@@ -702,25 +881,12 @@ class TemplateParser(HTMLParser):
             raise AssertionError("Source has not been initialized.")
         return self.source
 
-    def feed_str(self, s: str) -> None:
-        """Feed a string part of a Template to the parser."""
-        self.feed(s)
-
-    def feed_interpolation(self, index: int) -> None:
-        placeholder = self.placeholders.add_placeholder(index)
-        self.feed(placeholder)
-
     def feed_template(self, template: Template) -> None:
         """Feed a Template's content to the parser."""
         assert self.source is None, "Did you forget to call reset?"
         self.source = SourceTracker(template)
-        for i_index in range(len(template.interpolations)):
-            self.source.advance_string()
-            self.feed_str(template.strings[i_index])
-            self.source.advance_interpolation()
-            self.feed_interpolation(i_index)
-        self.source.advance_string()
-        self.feed_str(template.strings[-1])
+        for content in self.source:
+            self.feed(content)
 
     @staticmethod
     def parse(t: Template) -> TNode:
