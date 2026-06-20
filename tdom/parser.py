@@ -313,6 +313,21 @@ class SourceTracker:
         ip = self.interpolations[i_index]
         return ip.expression if ip.expression else f"{{{fallback_prefix}-{i_index}}}"
 
+    def remake_fragment_str(self, ref: TemplateRef) -> str:
+        """Remake a fragment of a template "as seen" in the template for error reporting."""
+        return "".join(
+            (part if isinstance(part, str) else self.remake_interpolation_str(part))
+            for part in ref
+        )
+
+    def remake_interpolation_str(self, i_index: int) -> str:
+        """Remake interpolation "as seen" in the template for error reporting."""
+        ip = self.template.interpolations[i_index]
+        expr_str = ip.expression
+        conversion_str = f"!{ip.conversion}" if ip.conversion is not None else ""
+        format_spec_str = f":{ip.format_spec}" if ip.format_spec else ""
+        return f"{{{expr_str}{conversion_str}{format_spec_str}}}"
+
     def format_starttag(self, i_index: int) -> str:
         """Format a component start tag for error messages."""
         return self.get_expression(i_index, fallback_prefix="component-starttag")
