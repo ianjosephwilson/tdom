@@ -1,6 +1,7 @@
 import typing as t
 from dataclasses import dataclass, field
 
+from .source import EndTagSourceInfo, StartTagSourceInfo
 from .template_utils import TemplateRef
 
 
@@ -78,6 +79,8 @@ class TElement(TNode):
     tag: str
     attrs: tuple[TAttribute, ...] = field(default_factory=tuple)
     children: tuple[TNode, ...] = field(default_factory=tuple)
+    start_sinfo: StartTagSourceInfo | None = field(default=None, compare=False)
+    end_sinfo: EndTagSourceInfo | None = field(default=None, compare=False)
 
 
 @dataclass(slots=True, frozen=True)
@@ -94,6 +97,9 @@ class TComponent(TNode):
     """The template ref that describes the component's children template."""
 
     attrs: tuple[TAttribute, ...] = field(default_factory=tuple)
+
+    start_sinfo: StartTagSourceInfo | None = field(default=None, compare=False)
+    end_sinfo: EndTagSourceInfo | None = field(default=None, compare=False)
 
 
 type TTag = TElement | TComponent | TFragment

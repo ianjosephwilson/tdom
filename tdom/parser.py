@@ -5,6 +5,13 @@ from string.templatelib import Interpolation, Template
 
 from .htmlspec import VOID_ELEMENTS
 from .placeholders import PlaceholderConfig, PlaceholderState
+from .source import (
+    EndTagSourceInfo,
+    FrozenPosition,
+    HTMLAttribute,
+    Position,
+    StartTagSourceInfo,
+)
 from .template_utils import TemplateRef, combine_template_refs
 from .tnodes import (
     TAttribute,
@@ -21,60 +28,31 @@ from .tnodes import (
     TText,
 )
 
-type HTMLAttribute = tuple[str, str | None]
-type HTMLAttributesDict = dict[str, str | None]
 
-
-@dataclass(frozen=True)
-class TagOpening:
-    "Track parse info at the opening of a tag for error reporting."
-
-    starttag_text: str
-    " Entire starttag as parsed, includes placeholders, . "
-    raw_attrs: Sequence[HTMLAttribute]
-    " Attrs as parsed, includes placeholders. "
-    startend: bool
-    " Was parsed as startend tag, ie. <tag />. "
-
-
-@dataclass(frozen=True)
-class TagClosing:
-    "Track info available when a tag is closed."
-
-    original_open_tag: OpenTag
-    " The original open tag that tracked this tag before it was closed. "
-
-
-class OpenTagBase:
-    """Mixin to make open tags hash by id and equal by id."""
-
-    def __hash__(self):
-        return hash(id(self))
-
-    def __eq__(self, other):
-        return id(self) == id(other)
-
-
-@dataclass(frozen=True, eq=False)
-class OpenTElement(OpenTagBase):
+@dataclass()
+class OpenTElement:
     tag: str
     attrs: tuple[TAttribute, ...]
+    start_sinfo: StartTagSourceInfo
     children: list[TNode] = field(default_factory=list)
 
 
-@dataclass(frozen=True, eq=False)
-class OpenTFragment(OpenTagBase):
+@dataclass()
+class OpenTFragment:
     children: list[TNode] = field(default_factory=list)
 
 
-@dataclass(frozen=True, eq=False)
-class OpenTComponent(OpenTagBase):
+@dataclass()
+class OpenTComponent:
     start_i_index: int
     children_start_s_index: int
     """The strings index where the component's children template starts."""
     offset_into_children_start_s: int
     """The offset INTO the starting string where the component's children template starts."""
     attrs: tuple[TAttribute, ...]
+
+    start_sinfo: StartTagSourceInfo
+
     # @NOTE: The `children` are discarded after parsing and are just used to
     # track template consistency or assist with error reporting.  If the
     # component is processed and returns its children template then that
@@ -85,36 +63,15 @@ class OpenTComponent(OpenTagBase):
 type OpenTag = OpenTElement | OpenTFragment | OpenTComponent
 
 
-type TNodeContainer = TComponent | TElement | TFragment
-" Alias for union of tnodes that have children. "
-
-
-@dataclass(slots=True)
-class Position:
-    "A position in a block of source code."
-
-    line: int = 1
-    " Line of code, starts at 1. "
-    offset: int = 0
-    " Offset from the start of the line, starts at 0. "
-
-
 @dataclass
 class SourceTracker:
-    """Tracks source locations within a Template for error reporting."""
-
-    # TODO: write utilities to generate complete error messages, with the
-    # template itself in context and the relevant line/column underlined/etc.
+    """Tracks template source and manages placeholders for the parser."""
 
     template: Template
     # if i_index >= s_index, feeding an interpolation;
     # otherwise, when i_index < s_index, feeding a string.
     i_index: int = -1  # The current interpolation index.
     s_index: int = -1  # The current string index.
-
-    tag_closings: dict[TNodeContainer, TagClosing] = field(default_factory=dict)
-
-    tag_openings: dict[OpenTag, TagOpening] = field(default_factory=dict)
 
     placeholders: PlaceholderState = field(default_factory=lambda: PlaceholderState())
 
@@ -136,7 +93,7 @@ class SourceTracker:
         else:
             raise AssertionError("{self.i_index=} should not exceed {self.s_index=}")
 
-    def to_template_pos(self, parser_pos: Position) -> Position:
+    def to_template_pos(self, parser_pos: FrozenPosition) -> FrozenPosition:
         """
         Translate the given parser (pos)ition into template (pos)ition.
 
@@ -179,7 +136,7 @@ class SourceTracker:
                     if offset_found >= parser_pos.offset:
                         # needed lines, found lines, found offset
                         tpos.offset = pos.offset = parser_pos.offset
-                        return tpos
+                        return tpos.freeze()
                     else:
                         # got enough lines, still need more offset
                         tpos.offset = pos.offset = offset_found
@@ -201,7 +158,7 @@ class SourceTracker:
                     pos.offset += offset_need
                     tpos.offset += offset_need
                     # had lines, found offset
-                    return tpos
+                    return tpos.freeze()
                 else:
                     tpos.offset += offset_found
                     pos.offset += offset_found
@@ -250,40 +207,14 @@ class SourceTracker:
                 else:
                     tpos.offset += LEFT_CURLY_BRACE + len(expr) + tail
                 if pos == parser_pos:
-                    return tpos
+                    return tpos.freeze()
         if pos == parser_pos:
             # @TODO: When can this fall through happen? Or is this always an error?
-            return tpos
+            return tpos.freeze()
         else:
             raise ValueError(
                 "Unexpected position {pos}, did not reach required position {parser_pos}"
             )
-
-    def record_tag_opening(
-        self,
-        open_tag: OpenTag,
-        starttag_text: str,
-        raw_attrs: Sequence[HTMLAttribute],
-        startend: bool,
-    ) -> TagOpening:
-        opening = self.tag_openings[open_tag] = TagOpening(
-            starttag_text=starttag_text, raw_attrs=raw_attrs, startend=startend
-        )
-        return opening
-
-    def record_tag_closing(
-        self, tnode: TNodeContainer, open_tag: OpenTag
-    ) -> TagClosing:
-        closing = self.tag_closings[tnode] = TagClosing(original_open_tag=open_tag)
-        return closing
-
-    def get_tag_closing(self, tnode: TNodeContainer) -> TagClosing:
-        """Get available info when `tnode` was created at closing of a tag."""
-        return self.tag_closings[tnode]
-
-    def get_tag_opening(self, open_tag: OpenTag) -> TagOpening:
-        """Get available info when `open_tag` was created at opening of a tag."""
-        return self.tag_openings[open_tag]
 
     @property
     def interpolations(self) -> tuple[Interpolation, ...]:
@@ -293,15 +224,6 @@ class SourceTracker:
         return (
             self.interpolations[i_index1].value == self.interpolations[i_index2].value
         )
-
-    def advance_interpolation(self) -> int:
-        """Call before processing an interpolation to move to the next one."""
-        self.i_index += 1
-        return self.i_index
-
-    def advance_string(self) -> int:
-        self.s_index += 1
-        return self.s_index
 
     def get_expression(
         self, i_index: int, fallback_prefix: str = "interpolation"
@@ -340,6 +262,9 @@ class TemplateParser(HTMLParser):
     root: OpenTFragment
     stack: list[OpenTag]
     source: SourceTracker | None
+
+    closed_component_children: dict[TComponent, list[TNode]]
+    "List of children for each closed component, stored at closing. "
 
     def __init__(self, *, convert_charrefs: bool = True):
         # This calls HTMLParser.reset() which we override to set up our state.
@@ -410,12 +335,12 @@ class TemplateParser(HTMLParser):
             open_tag = OpenTElement(
                 tag=tag,
                 attrs=self.make_tattrs(attrs),
-            )
-            source.record_tag_opening(
-                open_tag,
-                starttag_text=self.get_starttag_text(),
-                raw_attrs=attrs,
-                startend=startend,
+                start_sinfo=StartTagSourceInfo(
+                    starttag_text=self.get_starttag_text(),
+                    raw_attrs=tuple(attrs),
+                    startend=startend,
+                    pos=self.get_parser_pos(),
+                ),
             )
             return open_tag
 
@@ -460,12 +385,12 @@ class TemplateParser(HTMLParser):
             children_start_s_index=children_start_s_index,
             offset_into_children_start_s=offset_into_children_start_s,
             attrs=tattrs,
-        )
-        source.record_tag_opening(
-            open_tag,
-            starttag_text=starttag_text,
-            raw_attrs=attrs,
-            startend=startend,
+            start_sinfo=StartTagSourceInfo(
+                starttag_text=self.get_starttag_text(),
+                raw_attrs=tuple(attrs),
+                startend=startend,
+                pos=self.get_parser_pos(),
+            ),
         )
         return open_tag
 
@@ -516,13 +441,26 @@ class TemplateParser(HTMLParser):
         return len(tag_ref.strings[-1])
 
     def finalize_tag(
-        self, open_tag: OpenTag, endtag_i_index: int | None = None
+        self,
+        open_tag: OpenTag,
+        endtag_i_index: int | None = None,
+        endtag_parser_pos: FrozenPosition | None = None,
     ) -> TNode:
         """Finalize an OpenTag into a TNode."""
         source = self.get_source()
         match open_tag:
-            case OpenTElement(tag=tag, attrs=attrs, children=children):
-                tnode = TElement(tag=tag, attrs=attrs, children=tuple(children))
+            case OpenTElement(
+                tag=tag, attrs=attrs, children=children, start_sinfo=start_sinfo
+            ):
+                tnode = TElement(
+                    tag=tag,
+                    attrs=attrs,
+                    children=tuple(children),
+                    start_sinfo=start_sinfo,
+                    end_sinfo=EndTagSourceInfo(pos=endtag_parser_pos)
+                    if endtag_parser_pos
+                    else None,
+                )
             case OpenTFragment(children=children):
                 tnode = TFragment(children=tuple(children))
             case OpenTComponent(
@@ -530,6 +468,8 @@ class TemplateParser(HTMLParser):
                 children_start_s_index=children_start_s_index,
                 offset_into_children_start_s=offset_into_children_start_s,
                 attrs=attrs,
+                children=children,
+                start_sinfo=start_sinfo,
             ):
                 children_ref = self.extract_component_children_ref(
                     start_i_index=start_i_index,
@@ -543,8 +483,14 @@ class TemplateParser(HTMLParser):
                     end_i_index=endtag_i_index,
                     children_ref=children_ref,
                     attrs=attrs,
+                    start_sinfo=start_sinfo,
+                    end_sinfo=EndTagSourceInfo(pos=endtag_parser_pos)
+                    if endtag_parser_pos
+                    else None,
                 )
-        source.record_tag_closing(tnode, open_tag)
+                self.closed_component_children[tnode] = (
+                    children  # Save these for debugging.
+                )
         return tnode
 
     def extract_component_children_ref(
@@ -624,7 +570,7 @@ class TemplateParser(HTMLParser):
                     e = ValueError(
                         f"Mismatched closing tag </{tag}> for component with tag {{{starttag}}}."
                     )
-                    if self.has_ambiguous_forward_slash(open_tag):
+                    if self.has_ambiguous_forward_slash(open_tag.start_sinfo):
                         e.add_note(
                             f'Did you mean to quote the last attribute or put a space before "/>" for "<{{{starttag}}} .../>"?'
                         )
@@ -646,7 +592,9 @@ class TemplateParser(HTMLParser):
             raise AssertionError(msg)
         return starttag_text
 
-    def has_ambiguous_forward_slash(self, open_tag: OpenTag) -> bool:
+    def has_ambiguous_forward_slash(
+        self, start_sinfo: StartTagSourceInfo | None
+    ) -> bool:
         """
         Detect when an unquoted attribute value consumes a trailing "/" that
         *might* have been meant to attempt to self-close a tag, ie. "/>".
@@ -658,20 +606,18 @@ class TemplateParser(HTMLParser):
         Or more often "<{Component} title={title}/>" which should be corrected
         with "<{Component} title={title} />".
         """
-        if isinstance(open_tag, (OpenTElement, OpenTComponent)):
-            source = self.get_source()
-            parse_info = source.get_tag_opening(open_tag)
+        if start_sinfo is not None:
             return (
                 # has attributes
-                len(parse_info.raw_attrs) > 0
+                len(start_sinfo.raw_attrs) > 0
                 # last attr not bare attribute
-                and parse_info.raw_attrs[-1][1] is not None
+                and start_sinfo.raw_attrs[-1][1] is not None
                 # last char of last attr is "/"
-                and parse_info.raw_attrs[-1][1][-1] == "/"
+                and start_sinfo.raw_attrs[-1][1][-1] == "/"
                 # parsed starttag ends with "/>"
-                and parse_info.starttag_text.endswith("/>")
+                and start_sinfo.starttag_text.endswith("/>")
                 # if parsed as startend then its not ambiguous
-                and not parse_info.startend
+                and not start_sinfo.startend
             )
         return False
 
@@ -693,7 +639,7 @@ class TemplateParser(HTMLParser):
         final_tag = self.finalize_tag(open_tag)
         self.append_child(final_tag)
 
-    def get_parser_pos(self) -> Position:
+    def get_parser_pos(self) -> FrozenPosition:
         """
         Get the position of the parser.
 
@@ -703,7 +649,7 @@ class TemplateParser(HTMLParser):
         to construct the template position.
         """
         line, offset = self.getpos()
-        return Position(line=line, offset=offset)
+        return FrozenPosition(line=line, offset=offset)
 
     def get_template_pos_msg(self) -> str:
         """
@@ -734,7 +680,7 @@ class TemplateParser(HTMLParser):
             )
         open_tag = self.stack.pop()
         endtag_i_index = self.validate_end_tag(tag, open_tag)
-        final_tag = self.finalize_tag(open_tag, endtag_i_index)
+        final_tag = self.finalize_tag(open_tag, endtag_i_index, self.get_parser_pos())
         self.append_child(final_tag)
 
     def get_closed_tcomps(
@@ -759,8 +705,8 @@ class TemplateParser(HTMLParser):
             if isinstance(node, TComponent):
                 tcomps.append(node)
                 if recurse_component_children:
-                    tag_closing = self.get_source().get_tag_closing(node)
-                    nodes.extend(tag_closing.original_open_tag.children)
+                    children = self.closed_component_children.get(node, [])
+                    nodes.extend(children)
             elif isinstance(node, (TElement, TFragment)):
                 nodes.extend(node.children)
         return tcomps
@@ -805,6 +751,7 @@ class TemplateParser(HTMLParser):
         self.root = OpenTFragment()
         self.stack = []
         self.source = None
+        self.closed_component_children = {}
 
     def close(self) -> None:
         source = self.get_source()
@@ -824,7 +771,7 @@ class TemplateParser(HTMLParser):
             # this only applies to components.
             parent = self.stack[-1]
             if isinstance(parent, OpenTComponent) and self.has_ambiguous_forward_slash(
-                parent
+                parent.start_sinfo
             ):
                 # CASE: "<{C1} attr={value}/>" -- meant to self-close
                 # Maybe user meant to self-close?
@@ -846,15 +793,12 @@ class TemplateParser(HTMLParser):
                             comp.start_i_index, comp.end_i_index
                         )
                     ):
-                        tag_closing_info = source.get_tag_closing(comp)
                         starttag = source.format_starttag(comp.start_i_index)
                         endtag = source.format_endtag(comp.end_i_index)
                         e.add_note(
                             f"Component start tag, <{{{starttag}}}>, and end tag, </{{{endtag}}}>, have values that do not match."
                         )
-                        if self.has_ambiguous_forward_slash(
-                            tag_closing_info.original_open_tag
-                        ):
+                        if self.has_ambiguous_forward_slash(comp.start_sinfo):
                             e.add_note(
                                 f'Did you mean to quote the last attribute or put a space before "/>" for "<{{{starttag}}} .../>"?'
                             )

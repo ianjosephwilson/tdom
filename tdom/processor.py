@@ -29,14 +29,17 @@ from .htmlspec import (
     SVG_TAG_FIX,
     VOID_ELEMENTS,
 )
-from .parser import (
-    HTMLAttribute,
+from .parser import TemplateParser
+from .protocols import HasHTMLDunder
+from .scope import ScopedTemplate
+from .source import HTMLAttribute
+from .template_utils import TemplateRef
+from .tnodes import (
     TAttribute,
     TComment,
     TComponent,
     TDocumentType,
     TElement,
-    TemplateParser,
     TFragment,
     TInterpolatedAttribute,
     TLiteralAttribute,
@@ -45,9 +48,6 @@ from .parser import (
     TTemplatedAttribute,
     TText,
 )
-from .protocols import HasHTMLDunder
-from .scope import ScopedTemplate
-from .template_utils import TemplateRef
 from .utils import CachableTemplate, LastUpdatedOrderedDict
 
 type Attribute = tuple[str, object]

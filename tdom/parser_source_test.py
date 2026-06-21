@@ -6,7 +6,8 @@ from string.templatelib import Template
 
 import pytest
 
-from .parser import Position, SourceTracker
+from .parser import SourceTracker
+from .source import FrozenPosition
 
 sample_t = t"<div title={'title'}>{'text'}</div>"
 
@@ -41,7 +42,7 @@ class TestPositionTracking:
         t = t"<div>content</div>"
         source = SourceTracker(t)
         for i in range(len(t.strings[0])):
-            parser_pos = Position(line=1, offset=i)
+            parser_pos = FrozenPosition(line=1, offset=i)
             template_pos = source.to_template_pos(parser_pos)
             assert template_pos.line == 1 and template_pos.offset == i
 
@@ -52,7 +53,7 @@ class TestPositionTracking:
         t = Template(s)
         source = SourceTracker(t)
         for line in range(5, 1, 1):
-            parser_pos = Position(line=line, offset=0)
+            parser_pos = FrozenPosition(line=line, offset=0)
             template_pos = source.to_template_pos(parser_pos)
             assert template_pos.line == line and template_pos.offset == 0
 
@@ -66,7 +67,7 @@ class TestPositionTracking:
         assert contents_str[last_char_index - 5 : last_char_index + 1] == "</div>", (
             "Check our numbers."
         )
-        parser_pos = Position(line=1, offset=last_char_index)
+        parser_pos = FrozenPosition(line=1, offset=last_char_index)
         template_pos = source.to_template_pos(parser_pos)
         exp = 5 + (5 * 4 + 2 + 2) + 5  # <div>+fourfourfourfourfour+{}+''+</div
         assert template_pos.line == 1 and template_pos.offset == exp
@@ -77,7 +78,7 @@ class TestPositionTracking:
         source = SourceTracker(t)
         assert list(iter(source))
         for line in (1, 2, 3, 4):
-            parser_pos = Position(line=line, offset=0)
+            parser_pos = FrozenPosition(line=line, offset=0)
             template_pos = source.to_template_pos(parser_pos)
             assert template_pos.line == line and template_pos.offset == 0
 
@@ -93,7 +94,7 @@ class TestPositionTracking:
         contents_str = "".join(contents)
         last_char_index = len(contents_str) - 1
         assert contents_str[last_char_index] == ">", "Check last char in test template."
-        parser_pos = Position(line=1, offset=last_char_index)
+        parser_pos = FrozenPosition(line=1, offset=last_char_index)
         template_pos = source.to_template_pos(parser_pos)
         assert template_pos.line == 2
 
@@ -105,7 +106,7 @@ class TestPositionTracking:
         contents_str = "".join(contents)
         last_char_index = len(contents_str) - 1
         assert contents_str[last_char_index] == ">"
-        parser_pos = Position(line=1, offset=last_char_index)
+        parser_pos = FrozenPosition(line=1, offset=last_char_index)
         template_pos = source.to_template_pos(parser_pos)
         assert (
             template_pos.line == 1
@@ -119,7 +120,7 @@ class TestPositionTracking:
         last_offset = len(
             contents_str
         )  # if str is '' then offset is 0, so if str in 'abc' then last offset produces ''
-        parser_pos = Position(line=1, offset=last_offset + 1)
+        parser_pos = FrozenPosition(line=1, offset=last_offset + 1)
         with pytest.raises(ValueError, match="Unexpected position"):
             _ = source.to_template_pos(parser_pos)
 
@@ -127,6 +128,6 @@ class TestPositionTracking:
         source = SourceTracker(t"<div>{0}</div>")
         contents_str = "".join(iter(source))
         last_line = contents_str.count("\n") + 1  # Add 1 because counting starts at 1
-        parser_pos = Position(line=last_line + 1, offset=0)
+        parser_pos = FrozenPosition(line=last_line + 1, offset=0)
         with pytest.raises(ValueError, match="Unexpected position"):
             _ = source.to_template_pos(parser_pos)
