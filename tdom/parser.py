@@ -773,7 +773,7 @@ class TemplateParser(HTMLParser):
             e = ParsingError(f"Invalid HTML structure: {unclosed_msg}.")
             self.run_unclosed_ambiguous_slash_checks(parent, e)
             raise e
-        if self.source and self.source.has_placeholders():
+        if self.source is not None and self.source.has_placeholders():
             raise ParsingError("Some placeholders were never resolved.")
         super().close()
 
@@ -817,7 +817,7 @@ class TemplateParser(HTMLParser):
         return self.source
 
     def track_source(self, template: Template) -> SourceTracker:
-        if self.source:
+        if self.source is not None:
             raise AssertionError("Did you forget to call reset?")
         source = self.source = configure_source_tracker(template)
         return source
