@@ -431,7 +431,6 @@ class TemplateParser(HTMLParser):
                 attrs=attrs,
                 source_pos=source_pos,
                 sinfo=sinfo,
-                children=children,
             ):
                 children_span = (
                     TemplateSpan(start=children_start, stop=endtag_pos)
