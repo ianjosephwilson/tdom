@@ -328,9 +328,7 @@ class ParsingErrorHelper:
 
         @NOTE: This adds exception notes to the exception but does not throw it.
         """
-        if isinstance(
-            parent, (OpenTElement, OpenTComponent)
-        ) and self.has_ambiguous_forward_slash(parent.sinfo):
+        if self.has_ambiguous_forward_slash(parent.sinfo):
             # CASE: t"<{C1} attr={value}/>" -- maybe user meant to self-close?
             # CASE: t"<div attr={value}/>" -- maybe user meant to self-close?
             starttag_span = parent.sinfo.starttag_span
