@@ -19,6 +19,7 @@ from .escaping import (
 from .escaping import (
     escape_html_text as default_escape_html_text,
 )
+from .exc import TemplatingError
 from .format import format_interpolation as base_format_interpolation
 from .format import format_template
 from .htmlspec import (
@@ -65,7 +66,7 @@ class TemplateErrorState:
     iter_index: int | None = None
 
 
-class ProcessingError(Exception):
+class ProcessingError(TemplatingError):
     """General error when processing a template."""
 
     last_tnode: TNode | None
