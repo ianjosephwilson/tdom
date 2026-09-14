@@ -66,19 +66,19 @@ class SourceReader:
             == self.template.interpolations[i_index2].value
         )
 
-    def ref_to_repr(self, ref: TemplateRef, limit: int | None = None) -> str:
+    def ref_to_repr(self, ref: TemplateRef) -> str:
         """
         Convert tref to string representation of the underlying template.
         """
         filled_template = ref.bind(self.template.interpolations)
-        return template_repr(filled_template)[:limit]
+        return template_repr(filled_template)
 
-    def span_to_repr(self, span: TemplateSpan, limit: int | None = None) -> str:
+    def span_to_repr(self, span: TemplateSpan) -> str:
         """
         Extract template span and convert to string representation.
         """
         filled_template = span.extract(self.template)
-        return template_repr(filled_template)[:limit]
+        return template_repr(filled_template)
 
     def span_to_template(self, span: TemplateSpan) -> Template:
         return span.extract(self.template)
