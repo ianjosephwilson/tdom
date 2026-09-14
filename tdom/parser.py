@@ -197,20 +197,6 @@ class SourceTracker:
             raw_parser_start, raw_parser_length
         )
 
-    def get_expression(
-        self, i_index: int, fallback_prefix: str = "interpolation"
-    ) -> str:
-        """
-        Resolve an interpolation index to its original expression for error messages.
-        Falls back to a synthetic expression if the original is empty.
-        """
-        ip = self.template.interpolations[i_index]
-        return ip.expression or f"{{{fallback_prefix}-{i_index}}}"
-
-    def format_starttag(self, i_index: int) -> str:
-        """Format a component start tag for error messages."""
-        return self.get_expression(i_index, fallback_prefix="component-starttag")
-
 
 def make_error_helper(parser: TemplateParser) -> ParsingErrorHelper:
     """
