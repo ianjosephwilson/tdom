@@ -233,7 +233,6 @@ class ParsingErrorHelper:
     def make_mismatch_error(
         self,
         starttag_sinfo: OpenTagSourceInfo,
-        starttag_attrs: tuple[TAttribute, ...],
         endtag_ref: TemplateRef,
         endtag_pos: PartPosition,
     ) -> ParsingError:
@@ -595,7 +594,7 @@ class TemplateParser(HTMLParser):
             case OpenTElement():
                 if tag_ref.is_singleton or (tag_ref.is_literal and tag != open_tag.tag):
                     raise make_error_helper(self).make_mismatch_error(
-                        open_tag.sinfo, open_tag.attrs, tag_ref, self.get_source_pos()
+                        open_tag.sinfo, tag_ref, self.get_source_pos()
                     )
                 elif not tag_ref.is_singleton and not tag_ref.is_literal:
                     raise make_error_helper(self).make_malformed_endtag_error(
@@ -605,7 +604,7 @@ class TemplateParser(HTMLParser):
             case OpenTComponent():
                 if tag_ref.is_literal:
                     raise make_error_helper(self).make_mismatch_error(
-                        open_tag.sinfo, open_tag.attrs, tag_ref, self.get_source_pos()
+                        open_tag.sinfo, tag_ref, self.get_source_pos()
                     )
                 if not tag_ref.is_singleton:
                     raise make_error_helper(self).make_malformed_endtag_error(
