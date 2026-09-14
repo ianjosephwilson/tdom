@@ -41,10 +41,6 @@ class ParsingError(TemplatingError):
     pass
 
 
-class ParsingAssertionError(ParsingError):
-    pass
-
-
 class AttributeParsingError(ParsingError):
     pass
 
@@ -621,9 +617,7 @@ class TemplateParser(HTMLParser):
         """Return the source span occupied by the current start tag."""
         starttag_text = self.get_starttag_text()
         if starttag_text is None:
-            raise ParsingAssertionError(
-                "Expected the parser to have starttag_text set."
-            )
+            raise AssertionError("Expected the parser to have starttag_text set.")
 
         source = self.get_source()
         line_pos = self.get_parser_pos()
@@ -754,12 +748,12 @@ class TemplateParser(HTMLParser):
 
     def get_source(self) -> SourceTracker:
         if self.source is None:
-            raise ParsingAssertionError("Source has not been initialized.")
+            raise AssertionError("Source has not been initialized.")
         return self.source
 
     def track_source(self, template: Template) -> SourceTracker:
         if self.source:
-            raise ParsingAssertionError("Did you forget to call reset?")
+            raise AssertionError("Did you forget to call reset?")
         source = self.source = configure_source_tracker(template)
         return source
 
