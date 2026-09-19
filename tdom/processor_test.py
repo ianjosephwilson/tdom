@@ -1019,7 +1019,9 @@ class TestInterpolationFormatSpec:
         for tag in ("p", "script", "style"):
             with pytest.raises(
                 ProcessingError,
-                match=re.escape("Should we wrap every call to format_interpolation and chain the exception?"),
+                match=re.escape(
+                    "Should we wrap every call to format_interpolation and chain the exception?"
+                ),
             ):
                 _ = html(
                     Template(f"<{tag}>")
@@ -1949,7 +1951,8 @@ class TestComponentErrors:
             raise ValueError("Failed to build template.")
 
         with pytest.raises(
-            ComponentInvocationError, match=re.escape("Failed when invoking component callable.")
+            ComponentInvocationError,
+            match=re.escape("Failed when invoking component callable."),
         ) as exc_info:
             _ = html(t"<{RaisesValueError}>Hello</{RaisesValueError}>")
         assert isinstance(exc_info.value.__cause__, ValueError), (
