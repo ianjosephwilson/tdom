@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from string.templatelib import Template
 
+from .exc import TemplatingError
 from .htmlspec import VOID_ELEMENTS
 from .parser_utils import (
     HTMLAttribute,
@@ -34,6 +35,14 @@ from .tnodes import (
     TText,
     TTree,
 )
+
+
+class ParsingError(TemplatingError):
+    pass
+
+
+class AttributeParsingError(ParsingError):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +83,6 @@ class OpenTElement:
 
 @dataclass
 class OpenTFragment:
-    source_pos: PartPosition | None = None
     children: list[TNode] = field(default_factory=list)
 
 
@@ -93,7 +101,7 @@ class OpenTComponent:
     children: list[TNode] = field(default_factory=list)
 
 
-type OpenTag = OpenTElement | OpenTFragment | OpenTComponent
+type OpenTag = OpenTElement | OpenTComponent
 
 
 def configure_source_tracker(
@@ -146,9 +154,6 @@ class SourceTracker:
         else:
             raise StopIteration
 
-    def get_reader(self) -> SourceReader:
-        return SourceReader(template=self.template)
-
     def remove_placeholders(self, text: str) -> TemplateRef:
         """
         Find tracked placeholders in text and mark them as found.
@@ -188,19 +193,79 @@ class SourceTracker:
             raw_parser_start, raw_parser_length
         )
 
-    def get_expression(
-        self, i_index: int, fallback_prefix: str = "interpolation"
-    ) -> str:
-        """
-        Resolve an interpolation index to its original expression for error messages.
-        Falls back to a synthetic expression if the original is empty.
-        """
-        ip = self.template.interpolations[i_index]
-        return ip.expression or f"{{{fallback_prefix}-{i_index}}}"
 
-    def format_starttag(self, i_index: int) -> str:
-        """Format a component start tag for error messages."""
-        return self.get_expression(i_index, fallback_prefix="component-starttag")
+def make_error_helper(parser: TemplateParser) -> ParsingErrorHelper:
+    """
+    Factory that creates an error helper for the parser.
+
+    @NOTE: This should only be used when an exception is already being
+    generated.
+    """
+    return ParsingErrorHelper(
+        reader=SourceReader(template=parser.get_source().template),
+        sinfo_table=parser.sinfo_table.copy(),
+    )
+
+
+@dataclass()
+class ParsingErrorHelper:
+    """
+    Helps the parser include extra info in parsing errors.
+
+    This helper *should not* decide what error to raise.
+
+    This helper *should* help to:
+        - include possible reasons (did you forget to close a quote?)
+        - include original template source (the start tag, etc.)
+        - include position info (line #, etc.)
+    """
+
+    reader: SourceReader
+    """ Used to read original template fragments and/or interpolation values. """
+
+    sinfo_table: dict[PartPosition, TagSourceInfo]
+    """ Source info mapping, copied from parser. """
+
+    def make_mismatch_error(
+        self,
+        starttag_sinfo: OpenTagSourceInfo,
+        endtag_ref: TemplateRef,
+        endtag_pos: PartPosition,
+    ) -> ParsingError:
+        starttag_repr = self.reader.span_to_repr(starttag_sinfo.starttag_span)
+        starttag_pos_msg = self.reader.make_template_pos_msg(
+            starttag_sinfo.starttag_pos
+        )
+        endtag_repr = self.reader.ref_to_repr(endtag_ref)
+        endtag_pos_msg = self.reader.make_template_pos_msg(endtag_pos)
+        return ParsingError(
+            f"Mismatched closing tag </{endtag_repr}> at {endtag_pos_msg} for {starttag_repr} at {starttag_pos_msg}."
+        )
+
+    def make_malformed_endtag_error(
+        self, endtag_ref: TemplateRef, endtag_pos: PartPosition
+    ) -> ParsingError:
+        endtag_repr = self.reader.ref_to_repr(endtag_ref)
+        endtag_pos_msg = self.reader.make_template_pos_msg(endtag_pos)
+        return ParsingError(
+            f"Component end tags must have exactly one interpolation, {endtag_repr} at {endtag_pos_msg}."
+        )
+
+    def make_unexpected_endtag_error(
+        self, endtag_ref: TemplateRef, endtag_pos: PartPosition
+    ) -> ParsingError:
+        endtag_repr = self.reader.ref_to_repr(endtag_ref)
+        endtag_pos_msg = self.reader.make_template_pos_msg(endtag_pos)
+        return ParsingError(
+            f"Unexpected closing tag </{endtag_repr}> with no open tag, {endtag_pos_msg}."
+        )
+
+    def make_unclosed_starttag_error(self, parent: OpenTag):
+        starttag_repr = self.reader.span_to_repr(parent.sinfo.starttag_span)
+        pos_msg = self.reader.make_template_pos_msg(parent.source_pos)
+        return ParsingError(
+            f"Invalid HTML structure: unclosed tag {starttag_repr} at {pos_msg}."
+        )
 
 
 class TemplateParser(HTMLParser):
@@ -219,7 +284,7 @@ class TemplateParser(HTMLParser):
     # Parse state helpers
     # ------------------------------------------
 
-    def get_parent(self) -> OpenTag:
+    def get_parent(self) -> OpenTag | OpenTFragment:
         """Return the current parent node to which new children should be added."""
         return self.stack[-1] if self.stack else self.root
 
@@ -269,11 +334,11 @@ class TemplateParser(HTMLParser):
             else:
                 return TTemplatedAttribute(name=name, value_ref=value_ref)
         if value_ref is not None:
-            raise ValueError(
+            raise AttributeParsingError(
                 "Attribute names cannot contain interpolations if the value is also interpolated."
             )
         if not name_ref.is_singleton:
-            raise ValueError(
+            raise AttributeParsingError(
                 "Spread attributes must have exactly one interpolation in the name."
             )
         return TSpreadAttribute(i_index=name_ref.i_start)
@@ -310,7 +375,7 @@ class TemplateParser(HTMLParser):
             )
 
         if not tag_ref.is_singleton:
-            raise ValueError(
+            raise ParsingError(
                 "Component element tags must have exactly one interpolation."
             )
 
@@ -360,8 +425,6 @@ class TemplateParser(HTMLParser):
                     children=tuple(children),
                     source_pos=source_pos,
                 )
-            case OpenTFragment(children=children, source_pos=source_pos):
-                return TFragment(children=tuple(children), source_pos=source_pos)
             case OpenTComponent(
                 start_i_index=start_i_index,
                 children_start=children_start,
@@ -386,43 +449,35 @@ class TemplateParser(HTMLParser):
     def validate_end_tag(self, tag: str, open_tag: OpenTag) -> int | None:
         """Validate that closing tag matches open tag. Return component end index if applicable."""
         source = self.get_source()
-        tag_ref = source.remove_placeholders(tag)
+        tag_ref = source.placeholders.remove_placeholders(tag)
 
         match open_tag:
             case OpenTElement():
-                if not tag_ref.is_literal:
-                    raise ValueError(
-                        f"Component closing tag found for element <{open_tag.tag}>."
+                if tag_ref.is_singleton or (tag_ref.is_literal and tag != open_tag.tag):
+                    raise make_error_helper(self).make_mismatch_error(
+                        open_tag.sinfo, tag_ref, self.get_source_pos()
                     )
-                if tag != open_tag.tag:
-                    raise ValueError(
-                        f"Mismatched closing tag </{tag}> for element <{open_tag.tag}>."
+                elif not tag_ref.is_singleton and not tag_ref.is_literal:
+                    raise make_error_helper(self).make_malformed_endtag_error(
+                        tag_ref, self.get_source_pos()
                     )
                 return None
-
-            case OpenTFragment():
-                raise NotImplementedError("We do not support anonymous fragments.")
-
-            case OpenTComponent(start_i_index=start_i_index):
+            case OpenTComponent():
                 if tag_ref.is_literal:
-                    raise ValueError(
-                        f"Mismatched closing tag </{tag}> for component starting at {source.format_starttag(start_i_index)}."
+                    raise make_error_helper(self).make_mismatch_error(
+                        open_tag.sinfo, tag_ref, self.get_source_pos()
                     )
                 if not tag_ref.is_singleton:
-                    raise ValueError(
-                        "Component end tags must have exactly one interpolation."
+                    raise make_error_helper(self).make_malformed_endtag_error(
+                        tag_ref, self.get_source_pos()
                     )
-                # HERE BE DRAGONS: the interpolation at end_i_index shuld be a
-                # component callable that matches the start tag. We do not check
-                # any of this in the parser, instead relying on higher layers.
                 return tag_ref.i_start
 
     def get_starttag_span(self) -> TemplateSpan:
         """Return the source span occupied by the current start tag."""
         starttag_text = self.get_starttag_text()
-        assert starttag_text is not None, (
-            "Expected the parser to have starttag_text set."
-        )
+        if starttag_text is None:
+            raise AssertionError("Expected the parser to have starttag_text set.")
 
         source = self.get_source()
         line_pos = self.get_parser_pos()
@@ -449,12 +504,22 @@ class TemplateParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         endtag_pos = self.get_source_pos()
         if not self.stack:
-            raise ValueError(f"Unexpected closing tag </{tag}> with no open tag.")
-
+            source = self.get_source()
+            endtag_ref = source.find_placeholders(tag)
+            if endtag_ref.is_literal or endtag_ref.is_singleton:
+                raise make_error_helper(self).make_unexpected_endtag_error(
+                    endtag_ref, endtag_pos
+                )
+            else:
+                raise make_error_helper(self).make_malformed_endtag_error(
+                    endtag_ref, endtag_pos
+                )
         open_tag = self.stack.pop()
         endtag_i_index = self.validate_end_tag(tag, open_tag)
         final_tag = self.finalize_tag(
-            open_tag, endtag_i_index=endtag_i_index, endtag_pos=endtag_pos
+            open_tag,
+            endtag_i_index=endtag_i_index,
+            endtag_pos=endtag_pos,
         )
         self.append_child(final_tag)
 
@@ -486,13 +551,13 @@ class TemplateParser(HTMLParser):
         source = self.get_source()
         ref = source.remove_placeholders(decl)
         if not ref.is_literal:
-            raise ValueError("Interpolations are not allowed in declarations.")
+            raise ParsingError("Interpolations are not allowed in declarations.")
         elif decl.upper().startswith("DOCTYPE "):
             doctype_content = decl[7:].strip()
             doctype = TDocumentType(doctype_content, source_pos=self.get_source_pos())
             self.append_child(doctype)
         else:
-            raise NotImplementedError(
+            raise ParsingError(
                 "Only well formed DOCTYPE declarations are currently supported."
             )
 
@@ -506,9 +571,9 @@ class TemplateParser(HTMLParser):
     def close(self) -> None:
         super().close()
         if self.stack:
-            raise ValueError("Invalid HTML structure: unclosed tags remain.")
+            raise make_error_helper(self).make_unclosed_starttag_error(self.stack[-1])
         if self.source and self.source.has_placeholders():
-            raise ValueError("Some placeholders were never resolved.")
+            raise ParsingError("Some placeholders were never resolved.")
 
     # ------------------------------------------
     # Getting the parsed node tree
@@ -516,11 +581,10 @@ class TemplateParser(HTMLParser):
 
     def get_tnode(self) -> TNode:
         """Get the Node tree parsed from the input HTML."""
-        # TODO: consider always returning a TTag?
         if len(self.root.children) > 1:
             # The parse structure results in multiple root elements, so we
             # return a Fragment to hold them all.
-            return self.finalize_tag(self.root)
+            return TFragment(children=tuple(self.root.children))
         elif len(self.root.children) == 1:
             # The parse structure results in a single root element, so we
             # return that element directly. This will be a non-Fragment Node.
@@ -529,7 +593,7 @@ class TemplateParser(HTMLParser):
             # Special case: the parse structure is empty; we treat
             # this as an empty document fragment.
             # CONSIDER: or as an empty text node?
-            return self.finalize_tag(self.root)
+            return TFragment(children=())
 
     def get_ttree(self) -> TTree:
         return TTree(
