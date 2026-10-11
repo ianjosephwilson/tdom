@@ -514,9 +514,9 @@ def _resolve_t_attrs(
                     else:
                         new_attrs[sub_k] = sub_v
             case _:
-                raise AttributeProcessingError(
-                    f"Unknown TAttribute type: {type(attr).__name__}"
-                )
+                # @NOTE: This would be an internal error so we use a native
+                # exception.
+                raise TypeError(f"Unknown TAttribute type: {type(attr).__name__}")
     for acc_name, acc in attr_accs.items():
         # Skip "touching" the key here so that the order remains intact.
         super(type(new_attrs), new_attrs).__setitem__(acc_name, acc.to_value())
@@ -918,7 +918,9 @@ class TemplateProcessor(ITemplateProcessor):
                             "An error occurred processing text."
                         ) from e
                 case _:
-                    raise ValueError(f"Unrecognized tnode: {tnode}")
+                    # @NOTE: This would be an internal error so we use a
+                    # native exception.
+                    raise TypeError(f"Unrecognized tnode: {tnode}")
         except ProcessingError as e:
             assert not e.closed, (
                 "Exceptions raised by another processor must be wrapped."
