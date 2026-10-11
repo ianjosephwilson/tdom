@@ -127,11 +127,10 @@ class ProcessingErrorHelper:
                 # Just skip this special case where processing could not
                 # even get started because the template wouldn't parse.
                 continue
-            elif not (e_state.tnode and e_state.template):
-                raise AssertionError(
+            else:
+                assert e_state.tnode and e_state.template, (
                     "This should not happen if we have properly contained the error."
                 )
-            else:
                 notes.append(
                     self._make_tnode_error_note(
                         e_state.ttree, e_state.tnode, e_state.template
