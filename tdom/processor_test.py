@@ -2413,11 +2413,8 @@ class TestProcessingException:
         wrapper_t = t"<div>{inner_t}</div>"
         with pytest.raises(ProcessingError) as exc_info:
             _ = html(wrapper_t)
-        assert len(exc_info.value.template_e_states) == 2
-        assert not exc_info.value.template_e_states[0].ttree, (
-            "This can't be set for a parsing error."
-        )
-        wrapper_tnode = exc_info.value.template_e_states[1].tnode
+        assert len(exc_info.value.template_e_states) == 1
+        wrapper_tnode = exc_info.value.template_e_states[0].tnode
         assert wrapper_tnode and isinstance(wrapper_tnode, TText)
         assert isinstance(exc_info.value.__cause__, ParsingError), (
             "ProcessingError should be chained to parsing error."

@@ -30,7 +30,7 @@ from .htmlspec import (
     SVG_TAG_FIX,
     VOID_ELEMENTS,
 )
-from .parser import ParsingError, TemplateParser
+from .parser import TemplateParser
 from .parser_utils import HTMLAttribute
 from .protocols import HasHTMLDunder
 from .scope import ScopedTemplate
@@ -60,8 +60,8 @@ type AttributesDict = dict[str, object]
 @dataclass(frozen=True)
 class TemplateErrorState:
     template: Template
-    ttree: TTree | None = None
-    tnode: TNode | None = None
+    ttree: TTree
+    tnode: TNode
 
 
 class ProcessingError(TemplatingError):
@@ -82,28 +82,29 @@ class ProcessingError(TemplatingError):
         self.nearest_tnode = None
         self.closed = False
 
-    def push_unparsed_template_error(self, template: Template) -> None:
+    def _check_closed(self) -> None:
         assert not self.closed, "Cannot modify once closed."
-        self.template_e_states.append(
-            TemplateErrorState(template=template, ttree=None, tnode=None)
-        )
 
-    def push_template_error(self, template: Template, ttree: TTree) -> None:
-        assert not self.closed, "Cannot modify once closed."
+    def push_template_error(
+        self, template: Template, ttree: TTree, tnode: TNode
+    ) -> None:
+        self._check_closed()
         self.template_e_states.append(
             TemplateErrorState(
                 template=template,
                 ttree=ttree,
-                tnode=self.pop_nearest_tnode(),
+                tnode=tnode,
             )
         )
 
     def pop_nearest_tnode(self) -> TNode | None:
+        self._check_closed()
         t = self.nearest_tnode
         self.nearest_tnode = None
         return t
 
     def stash_nearest_tnode(self, tnode: TNode) -> None:
+        self._check_closed()
         if self.nearest_tnode is None:
             self.nearest_tnode = tnode
 
@@ -117,33 +118,21 @@ class ProcessingErrorHelper:
     def make_process_error_notes(
         self,
         template_e_states: list[TemplateErrorState],
-    ) -> Sequence[str]:
+    ) -> tuple[str, ...]:
         """
         Add the accumulated notes from unwinding nested processing.
         """
-        notes = []
-        for e_state in reversed(template_e_states):
-            if not e_state.ttree:
-                # Just skip this special case where processing could not
-                # even get started because the template wouldn't parse.
-                continue
-            else:
-                assert e_state.tnode and e_state.template, (
-                    "This should not happen if we have properly contained the error."
-                )
-                notes.append(
-                    self._make_tnode_error_note(
-                        e_state.ttree, e_state.tnode, e_state.template
-                    )
-                )
-        return notes
+        return tuple(
+            self._make_tnode_error_note(e_state.ttree, e_state.tnode, e_state.template)
+            for e_state in reversed(template_e_states)
+        )
 
     def _make_tnode_error_note(
         self,
         ttree: TTree,  # The root metadata for the "current" template
         tnode: TNode,  # The leafmost tnode where the error was caught for the "current" template
         template: Template,  # The "current" template that was being processed
-    ) -> Sequence[str]:
+    ) -> str:
         """
         Add a single note accumulated either at the initial tnode of the error or
         a subsequent tnode in another template passed through during unwinding
@@ -843,7 +832,7 @@ class TemplateProcessor(ITemplateProcessor):
         Process a TDOM compatible template into a string.
         """
         try:
-            return self._process_template(root_template, assume_ctx, root=True)
+            return self._process_template(root_template, assume_ctx)
         except ProcessingError as e:
             assert not e.closed, (
                 "Exceptions raised by another processor must be wrapped."
@@ -855,23 +844,15 @@ class TemplateProcessor(ITemplateProcessor):
             e.close()
             raise
 
-    def _process_template(
-        self, template: Template, last_ctx: ProcessContext, root: bool = False
-    ) -> str:
-        try:
-            ttree = self.parser_api.to_ttree(template)
-        except ParsingError as parsing_e:
-            if root:
-                raise  # Special case where we pass parsing exception straight out
-            # Chain the parsing error into a processing error.
-            e = ProcessingError("Failed to parse template.")
-            e.push_unparsed_template_error(template)
-            raise e from parsing_e
+    def _process_template(self, template: Template, last_ctx: ProcessContext) -> str:
+        ttree = self.parser_api.to_ttree(template)
         try:
             return self._process_tnode(template, last_ctx, ttree.root)
         except ProcessingError as e:
             assert not e.closed, "A nested closed error should be chained."
-            e.push_template_error(template, ttree=ttree)
+            tnode = e.pop_nearest_tnode()
+            assert tnode, "Every error should be linked to a TNode."
+            e.push_template_error(template, ttree, tnode)
             raise
 
     def _process_tnode(
