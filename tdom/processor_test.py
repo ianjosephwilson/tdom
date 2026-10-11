@@ -1630,7 +1630,7 @@ class TestPrepComponentKwargs:
             pass
 
         callable_info = get_callable_info(Wrapper)
-        with pytest.raises(ValueError, match="Ambiguous attribute "):
+        with pytest.raises(ComponentProcessingError, match="Ambiguous attribute "):
             _ = prep_component_kwargs(
                 callable_info,
                 dict(attrs),
@@ -1911,7 +1911,7 @@ class TestComponentErrors:
             return sum([children] * count, t"")
 
         with pytest.raises(
-            AttributeProcessingError,
+            ComponentProcessingError,
             match="Error occurred processing component attributes",
         ):
             _ = html(t"<{Repeat} count={prep_attr:callback}><span>OK</span></{Repeat}>")
