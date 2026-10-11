@@ -578,7 +578,7 @@ def _prep_component_kwargs(
         snake_name = _kebab_to_snake(attr_name)
         if snake_name in callable_info.named_params:
             if snake_name in kwargs:
-                raise ValueError(
+                raise ComponentProcessingError(
                     f"Ambiguous attribute {attr_name}: Two attributes resolved to the same named param {snake_name}."
                 )
             kwargs[snake_name] = attr_value
@@ -766,7 +766,7 @@ class ComponentProcessor(IComponentProcessor):
         except Exception as e:
             if isinstance(e, ProcessingError) and not e.closed:
                 raise  # we raised this ourselves
-            raise AttributeProcessingError(
+            raise ComponentProcessingError(
                 "Error occurred processing component attributes"
             ) from e
         kwargs = _prep_component_kwargs(
