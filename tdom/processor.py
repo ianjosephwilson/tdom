@@ -107,13 +107,22 @@ class ProcessingError(TemplatingError):
         if self.nearest_tnode is None:
             self.nearest_tnode = tnode
 
-    def _add_process_error_notes(
+    def close(self) -> None:
+        assert not self.closed, "Processing error cannot be closed twice."
+        self.closed = True
+
+
+@dataclass
+class ProcessingErrorHelper:
+    def make_process_error_notes(
         self,
-    ) -> None:
+        template_e_states: list[TemplateErrorState],
+    ) -> Sequence[str]:
         """
         Add the accumulated notes from unwinding nested processing.
         """
-        for e_state in reversed(self.template_e_states):
+        notes = []
+        for e_state in reversed(template_e_states):
             if not e_state.ttree:
                 # Just skip this special case where processing could not
                 # even get started because the template wouldn't parse.
@@ -123,16 +132,19 @@ class ProcessingError(TemplatingError):
                     "This should not happen if we have properly contained the error."
                 )
             else:
-                self._add_tnode_error_note(
-                    e_state.ttree, e_state.tnode, e_state.template
+                notes.append(
+                    self._make_tnode_error_note(
+                        e_state.ttree, e_state.tnode, e_state.template
+                    )
                 )
+        return notes
 
-    def _add_tnode_error_note(
+    def _make_tnode_error_note(
         self,
         ttree: TTree,  # The root metadata for the "current" template
         tnode: TNode,  # The leafmost tnode where the error was caught for the "current" template
         template: Template,  # The "current" template that was being processed
-    ) -> None:
+    ) -> Sequence[str]:
         """
         Add a single note accumulated either at the initial tnode of the error or
         a subsequent tnode in another template passed through during unwinding
@@ -176,12 +188,7 @@ class ProcessingError(TemplatingError):
         else:
             starttag_pos_msg = "unknown location"  # source_pos is optional right now
 
-        self.add_note(f"Error occurred at {starttag_repr} at {starttag_pos_msg}.")
-
-    def close(self) -> None:
-        assert not self.closed, "Processing error cannot be closed twice."
-        self._add_process_error_notes()
-        self.closed = True
+        return f"Error occurred at {starttag_repr} at {starttag_pos_msg}."
 
 
 class AttributeProcessingError(ProcessingError):
@@ -842,6 +849,10 @@ class TemplateProcessor(ITemplateProcessor):
             assert not e.closed, (
                 "Exceptions raised by another processor must be wrapped."
             )
+            helper = ProcessingErrorHelper()
+            notes = helper.make_process_error_notes(e.template_e_states)
+            for note in notes:
+                e.add_note(note)
             e.close()
             raise
 
