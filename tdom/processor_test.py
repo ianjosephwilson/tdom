@@ -1009,7 +1009,6 @@ class TestInterpolationFormatSpec:
                 == f"<{tag}>The value is dynamic.</{tag}>"
             )
 
-    @pytest.mark.skip
     def test_callback_nonzero_callable_error(self):
         def add(a, b):
             return a + b
@@ -1017,12 +1016,7 @@ class TestInterpolationFormatSpec:
         assert add(1, 2) == 3, "Make sure fixture could work..."
 
         for tag in ("p", "script", "style"):
-            with pytest.raises(
-                ProcessingError,
-                match=re.escape(
-                    "Should we wrap every call to format_interpolation and chain the exception?"
-                ),
-            ):
+            with pytest.raises(TextProcessingError):
                 _ = html(
                     Template(f"<{tag}>")
                     + t"The sum is {add:callback}."
