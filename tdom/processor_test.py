@@ -1137,7 +1137,9 @@ class TestSpreadAttribute:
 
     def test_spread_attr_invalid_attr_name(self):
         attrs = {"x>v": "ok"}
-        with pytest.raises(AttributeProcessingError, match="invalid characters: >"):
+        with pytest.raises(
+            AttributeProcessingError, match=r'invalid characters: "\\U0000003E'
+        ):
             _ = html(t"<div {attrs}></div>")
 
 
@@ -1270,7 +1272,9 @@ class TestSpecialDataAttribute:
 
     def test_invalid_attr_name(self):
         data = {"x>v": "ok"}
-        with pytest.raises(AttributeProcessingError, match="invalid characters: >"):
+        with pytest.raises(
+            AttributeProcessingError, match=r'invalid characters: "\\U0000003E'
+        ):
             _ = html(t"<div data={data}></div>")
 
 
@@ -1314,7 +1318,9 @@ class TestSpecialAriaAttribute:
 
     def test_invalid_attr_name(self):
         aria = {"x>v": "ok"}
-        with pytest.raises(AttributeProcessingError, match="invalid characters: >"):
+        with pytest.raises(
+            AttributeProcessingError, match=r'invalid characters: "\\U0000003E'
+        ):
             _ = html(t"<div aria={aria}></div>")
 
 

@@ -197,3 +197,21 @@ def make_invalid_attr_name_chars() -> set:
 
 
 INVALID_ATTRIBUTE_NAME_CHARS = make_invalid_attr_name_chars()
+
+
+def collect_invalid_attribute_name_chars(name: str) -> set[str]:
+    return INVALID_ATTRIBUTE_NAME_CHARS & set(name)
+
+
+def make_char_codepoint_reprs(chars: str) -> list[str]:
+    """
+    Make code point representation of the given characters.
+
+    This is mostly just meant to displaying an error message that doesn't
+    contain undecodable or unreadable (whitespace, control chars, etc.)
+    unicode characters in it.
+
+    @NOTE: This always generates the 8 digit hex code even if the 4 digit hex
+    code would be adequate.
+    """
+    return [r'"\U' + f'{ord(c):08X}"' for c in chars]

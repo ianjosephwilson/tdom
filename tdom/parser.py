@@ -4,7 +4,11 @@ from html.parser import HTMLParser
 from string.templatelib import Template
 
 from .exc import TemplatingError
-from .htmlspec import VOID_ELEMENTS
+from .htmlspec import (
+    VOID_ELEMENTS,
+    collect_invalid_attribute_name_chars,
+    make_char_codepoint_reprs,
+)
 from .parser_utils import (
     HTMLAttribute,
     ParserPositionTranslator,
@@ -325,6 +329,12 @@ class TemplateParser(HTMLParser):
         value_ref = source.remove_placeholders(value) if value is not None else None
 
         if name_ref.is_literal:
+            invalid_chars = collect_invalid_attribute_name_chars(name)
+            if invalid_chars:
+                reprs = make_char_codepoint_reprs("".join(invalid_chars))
+                raise AttributeParsingError(
+                    f"""Attribute name contains invalid characters: {", ".join(reprs)}"""
+                )
             if value_ref is None or value_ref.is_literal:
                 return TLiteralAttribute(name=name, value=value)
             elif value_ref.is_singleton:
