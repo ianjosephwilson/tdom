@@ -1,12 +1,20 @@
 """
 Security specific test suite.
+
+This doesn't exhaust every permuation possible but tries to make sure any
+sort of internal validation checks have not been disabled.
+
+### Approach
+
+- Maintain independent constants/values from library code to prevent failures
+in the library code from bypassing these checks.
 """
 
 from string.templatelib import Template
 
 import pytest
 
-from .htmlspec import INVALID_ATTRIBUTE_NAME_CHARS, make_char_codepoint_reprs
+from .htmlspec import make_char_codepoint_reprs
 from .parser import AttributeParsingError
 from .processor import (
     AttributeProcessingError,
@@ -34,11 +42,16 @@ def html():
     return _html
 
 
-NO_PARSER_TEST_ATTR_NAME_CHARS = (
-    {"\u000c", "\r", "\n", "\t", " "}  # whitespace is collapsed
-    | {"/"}  # these are removed in a lot of cases
-    | {">"}  # this breaks parsing directly
-)
+DYNAMIC_INVALID_ATTR_NAME_CHARS = (chr(0x0000), "/", "=", ">", '"', "'")
+"""
+Notable subset of invalid attr name chars found during processing.
+"""
+
+
+LITERAL_INVALID_ATTR_NAME_CHARS = (chr(0x0000), "=", '"', "'")
+"""
+Notable subset of invalid attr name chars found during parsing.
+"""
 
 
 class TestAttributeName:
@@ -51,14 +64,10 @@ class TestAttributeName:
     Example: Most notably the '>' will cause a start tag to prematurely
     terminate within the attribute name, cause the remainder to be treated as
     regular html, ie. "evil><script src=example.com/evil.js>".
-
-    Remediation: Raise an error when invalid characters are found in dynamic attribute names.
-
-    Preferred: Always utilize a whitelist when working with dynamic attribute names.
     """
 
-    @pytest.mark.parametrize("invalid_char", (chr(0x0000), "/", "=", ">"))
-    def test_spread_specific_invalid_chars(self, html, invalid_char):
+    @pytest.mark.parametrize("invalid_char", DYNAMIC_INVALID_ATTR_NAME_CHARS)
+    def test_spread_invalid_chars(self, html, invalid_char):
         """Test these specific chars in case our invalid set has a regression."""
         attrs = {
             f"a{invalid_char}b": "1",
@@ -69,19 +78,8 @@ class TestAttributeName:
         ):
             _ = html(t"<div {attrs} />")
 
-    @pytest.mark.parametrize("invalid_char", tuple(INVALID_ATTRIBUTE_NAME_CHARS))
-    def test_spread_all_invalid_chars(self, html, invalid_char):
-        attrs = {
-            f"a{invalid_char}b": "1",
-        }
-        with pytest.raises(
-            AttributeProcessingError,
-            match=f"contains invalid characters: {make_char_codepoint_reprs(invalid_char)}",
-        ):
-            _ = html(t"<div {attrs} />")
-
-    @pytest.mark.parametrize("invalid_char", (chr(0x0000), "/", "=", ">"))
-    def test_aria_specific_invalid_chars(self, html, invalid_char):
+    @pytest.mark.parametrize("invalid_char", DYNAMIC_INVALID_ATTR_NAME_CHARS)
+    def test_aria_invalid_chars(self, html, invalid_char):
         """Test these specific chars in case our invalid set has a regression."""
         aria = {
             f"a{invalid_char}b": "1",
@@ -92,20 +90,9 @@ class TestAttributeName:
         ):
             assert html(t"<div aria={aria} />")
 
-    @pytest.mark.parametrize("invalid_char", tuple(INVALID_ATTRIBUTE_NAME_CHARS))
-    def test_aria_all_invalid_chars(self, html, invalid_char):
-        aria = {
-            f"a{invalid_char}b": "1",
-        }
-        with pytest.raises(
-            AttributeProcessingError,
-            match=f"contains invalid characters: {make_char_codepoint_reprs(invalid_char)}",
-        ):
-            _ = html(t"<div aria={aria} />")
-
-    @pytest.mark.parametrize("invalid_char", (chr(0x0000), "/", "=", ">"))
-    def test_data_specific_invalid_chars(self, html, invalid_char):
-        """Test these specific chars in case our invalid set has a regression."""
+    @pytest.mark.parametrize("invalid_char", DYNAMIC_INVALID_ATTR_NAME_CHARS)
+    def test_data_invalid_chars(self, html, invalid_char):
+        """Test that invalid chars are caught using a few specific examples."""
         data = {
             f"a{invalid_char}b": "1",
         }
@@ -115,41 +102,12 @@ class TestAttributeName:
         ):
             _ = html(t"<div data={data} />")
 
-    @pytest.mark.parametrize("invalid_char", tuple(INVALID_ATTRIBUTE_NAME_CHARS))
-    def test_data_all_invalid_chars(self, html, invalid_char):
-        data = {
-            f"a{invalid_char}b": "1",
-        }
-        with pytest.raises(
-            AttributeProcessingError,
-            match=f"contains invalid characters: {make_char_codepoint_reprs(invalid_char)}",
-        ):
-            _ = html(t"<div data={data} />")
-
-    @pytest.mark.parametrize("invalid_char", (chr(0x0000), "="))
+    @pytest.mark.parametrize("invalid_char", LITERAL_INVALID_ATTR_NAME_CHARS)
     def test_parser_specific_invalid_chars(self, html, invalid_char):
-        """Test these specific chars in case our invalid set has a regression."""
+        """Test that invalid chars are caught using a few specific examples."""
         with pytest.raises(
             AttributeParsingError,
             match=f"contains invalid characters: {make_char_codepoint_reprs(invalid_char)}",
         ):
-            print((invalid_char, html(Template(f"<div {invalid_char}='1' />"))))
-
-    @pytest.mark.parametrize(
-        "invalid_char",
-        tuple(INVALID_ATTRIBUTE_NAME_CHARS - NO_PARSER_TEST_ATTR_NAME_CHARS),
-    )
-    def test_parser_all_invalid_chars(self, html, invalid_char):
-        """Test these specific chars in case our invalid set has a regression."""
-        with pytest.raises(
-            AttributeParsingError,
-            match=f"Attribute name contains invalid characters: {make_char_codepoint_reprs(invalid_char)}",
-        ):
-            # With value
-            print((invalid_char, html(Template(f"<div {invalid_char}='1' />"))))
-        with pytest.raises(
-            AttributeParsingError,
-            match=f"Attribute name contains invalid characters: {make_char_codepoint_reprs(invalid_char)}",
-        ):
-            # Boolean
-            print((invalid_char, html(Template(f"<div {invalid_char} />"))))
+            # We use `Template` here because we are testing the parsing of static text.
+            _ = html(Template(f"<div {invalid_char}=1 />"))
