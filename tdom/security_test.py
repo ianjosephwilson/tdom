@@ -67,8 +67,7 @@ class TestAttributeName:
     """
 
     @pytest.mark.parametrize("invalid_char", DYNAMIC_INVALID_ATTR_NAME_CHARS)
-    def test_spread_invalid_chars(self, html, invalid_char):
-        """Test these specific chars in case our invalid set has a regression."""
+    def test_spread_attr(self, html, invalid_char):
         attrs = {
             f"a{invalid_char}b": "1",
         }
@@ -79,8 +78,7 @@ class TestAttributeName:
             _ = html(t"<div {attrs} />")
 
     @pytest.mark.parametrize("invalid_char", DYNAMIC_INVALID_ATTR_NAME_CHARS)
-    def test_aria_invalid_chars(self, html, invalid_char):
-        """Test these specific chars in case our invalid set has a regression."""
+    def test_aria_attr(self, html, invalid_char):
         aria = {
             f"a{invalid_char}b": "1",
         }
@@ -91,8 +89,7 @@ class TestAttributeName:
             assert html(t"<div aria={aria} />")
 
     @pytest.mark.parametrize("invalid_char", DYNAMIC_INVALID_ATTR_NAME_CHARS)
-    def test_data_invalid_chars(self, html, invalid_char):
-        """Test that invalid chars are caught using a few specific examples."""
+    def test_data_attr(self, html, invalid_char):
         data = {
             f"a{invalid_char}b": "1",
         }
@@ -103,7 +100,7 @@ class TestAttributeName:
             _ = html(t"<div data={data} />")
 
     @pytest.mark.parametrize("invalid_char", LITERAL_INVALID_ATTR_NAME_CHARS)
-    def test_parser_specific_invalid_chars(self, html, invalid_char):
+    def test_literal_attr(self, html, invalid_char):
         """Test that invalid chars are caught using a few specific examples."""
         with pytest.raises(
             AttributeParsingError,
