@@ -45,6 +45,8 @@ def html():
 
 
 class TestDynamicAttributeName:
+    """Test dynamic attribute names generated in the processor."""
+
     @pytest.mark.parametrize("invalid_char", (chr(0x0000), "/", "=", ">", '"', "'"))
     def test_spread_attr(self, html, invalid_char):
         attrs = {
@@ -80,6 +82,8 @@ class TestDynamicAttributeName:
 
 
 class TestLiteralAttributeName:
+    """Test literal attribute names parsed in the parser."""
+
     @pytest.mark.parametrize("invalid_char", (chr(0x0000), "=", '"', "'"))
     def test_literal_attr(self, html, invalid_char):
         """Test that invalid chars are caught using a few specific examples."""
@@ -92,9 +96,7 @@ class TestLiteralAttributeName:
 
 
 class TestLiteralAttributeValue:
-    """
-    Certain characters must be wrapped in quotes and/or escaped.
-    """
+    """Test literal attribute values parsed in the parser."""
 
     def test_unquoted_double_quote(self, html):
         assert (
@@ -168,6 +170,8 @@ class TestLiteralAttributeValue:
 
 
 class TestDynamicAttributeValue:
+    """Test dynamic attribute values generated in the processor."""
+
     @pytest.mark.parametrize(
         "escaped_char, expected",
         (
