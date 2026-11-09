@@ -17,7 +17,7 @@ from string.templatelib import Template
 import pytest
 
 from .htmlspec import make_char_codepoint_reprs
-from .parser import AttributeParsingError
+from .parser import AttributeParsingError, ParsingError
 from .processor import (
     AttributeProcessingError,
     ProcessContext,
@@ -262,3 +262,45 @@ class TestDynamicAttributeValue:
             html(t"<div x=prefix_{escaped_char}></div>")
             == f'<div x="prefix_{expected}"></div>'
         )
+
+
+TAB = "\t"
+LF = "\u000a"  # \n
+FF = "\u000c"  # \f
+CR = "\u000d"  # \r
+GT = ">"
+SOLIDUS = "\u002f"  # /
+
+
+class TestLiteralEscapableRawText:
+    """Tests for text that *can* be escaped by entities.
+
+    This text can exist in `TEXTAREA`, `TITLE`, etc.
+    """
+
+    @pytest.mark.parametrize(
+        "trailing_char, tag",
+        tuple(
+            (c, t) for c in (TAB, LF, FF, CR, SOLIDUS) for t in ("title", "textarea")
+        ),
+    )
+    @pytest.mark.xfail(reason="Known parsing issue: unparsed input discarded.")
+    def test_cannot_contain_closing_tag(self, html, trailing_char, tag):
+        """Partial versions of the closing tag are disallowed."""
+        t = Template(f"<{tag}></{tag}{trailing_char}</{tag}>")
+        with pytest.raises(ParsingError):
+            _ = html(t)
+
+    @pytest.mark.parametrize(
+        "before, after, tag",
+        tuple(
+            (before, after, tag)
+            for before in ("", "a")
+            for after in ("", "a")
+            for tag in ("title", "textarea")
+        ),
+    )
+    def test_cannot_contain_closing_tag_gt(self, html, before, after, tag):
+        """Test complete closing tag is not allowed."""
+        with pytest.raises(ParsingError):
+            _ = html(Template(f"<{tag}>{before}</{tag}>{after}</{tag}>"))
