@@ -13,6 +13,7 @@ a different invalid version could *pass* but still be invalid.
 """
 
 from string.templatelib import Template
+from types import SimpleNamespace
 
 import pytest
 
@@ -44,10 +45,36 @@ def html():
     return _html
 
 
+TAB="\t"
+LF="\u000a"  # \n
+FF="\u000c"  # \f
+CR="\u000d"  # \r
+GT=">"
+SOLIDUS="\u002f"  # /
+LT = "<"
+SQ = "'"
+DQ = '"'
+BT = "`"
+AMP = "&"
+NULL="\u0000"
+EQ = "="
+
+ENT_BY_CHAR = {
+    LT: "&lt;",
+    GT: "&gt;",
+    SQ: "&#39;",
+    DQ: "&#34;",
+    AMP: "&amp;",
+}
+
+HEX_LT = r"\x3c"
+assert HEX_LT != LT, "Confirm we didn't regress on escaping the \."
+
+
 class TestDynamicAttributeName:
     """Test dynamic attribute names generated in the processor."""
 
-    @pytest.mark.parametrize("invalid_char", (chr(0x0000), "/", "=", ">", '"', "'"))
+    @pytest.mark.parametrize("invalid_char", (NULL, SOLIDUS, EQ, GT, DQ, SQ))
     def test_spread_attr(self, html, invalid_char):
         attrs = {
             f"a{invalid_char}b": "1",
@@ -58,7 +85,7 @@ class TestDynamicAttributeName:
         ):
             _ = html(t"<div {attrs} />")
 
-    @pytest.mark.parametrize("invalid_char", (chr(0x0000), "/", "=", ">", '"', "'"))
+    @pytest.mark.parametrize("invalid_char", (NULL, SOLIDUS, EQ, GT, DQ, SQ))
     def test_aria_attr(self, html, invalid_char):
         aria = {
             f"a{invalid_char}b": "1",
@@ -69,7 +96,7 @@ class TestDynamicAttributeName:
         ):
             assert html(t"<div aria={aria} />")
 
-    @pytest.mark.parametrize("invalid_char", (chr(0x0000), "/", "=", ">", '"', "'"))
+    @pytest.mark.parametrize("invalid_char", (NULL, SOLIDUS, EQ, GT, DQ, SQ))
     def test_data_attr(self, html, invalid_char):
         data = {
             f"a{invalid_char}b": "1",
@@ -84,7 +111,7 @@ class TestDynamicAttributeName:
 class TestLiteralAttributeName:
     """Test literal attribute names parsed in the parser."""
 
-    @pytest.mark.parametrize("invalid_char", (chr(0x0000), "=", '"', "'"))
+    @pytest.mark.parametrize("invalid_char", (NULL, EQ, DQ, SQ))
     def test_literal_attr(self, html, invalid_char):
         """Test that invalid chars are caught using a few specific examples."""
         with pytest.raises(
@@ -98,13 +125,16 @@ class TestLiteralAttributeName:
 class TestLiteralAttributeValue:
     """Test literal attribute values parsed in the parser."""
 
+    @pytest.mark.skip(
+        "HTMLParser chokes on dangling quotes and keeps waiting for more data."
+    )
     def test_unquoted_double_quote(self, html):
         assert (
             html(t'<div x="></div>') == ""
         )  # This is currently not working, but not a security issue.
 
     def test_quoted_dangling_double_quote(self, html):
-        assert html(t"""<div x='"'></div>""") == '<div x="&#34;"></div>'
+        assert html(t"""<div x='"'></div>""") == f'<div x="{ENT_BY_CHAR[DQ]}"></div>'
 
     @pytest.mark.skip(
         "HTMLParser chokes on dangling quotes and keeps waiting for more data."
@@ -112,13 +142,16 @@ class TestLiteralAttributeValue:
     def test_dangling_double_quote(self, html):
         assert html(t'<div x="></div>') == """<div x='"'></div>"""  # or escaped
 
+    @pytest.mark.skip(
+        "HTMLParser chokes on dangling quotes and keeps waiting for more data."
+    )
     def test_unquoted_single_quote(self, html):
         assert (
             html(t"<div x='></div>") == ""
         )  # This is currently not working, but not a security issue.
 
     def test_quoted_single_quote(self, html):
-        assert html(t"""<div x="'"></div>""") == '<div x="&#39;"></div>'
+        assert html(t"""<div x="'"></div>""") == f'<div x="{ENT_BY_CHAR[SQ]}"></div>'
 
     @pytest.mark.skip(
         "HTMLParser chokes on dangling quotes and keeps waiting for more data."
@@ -139,7 +172,7 @@ class TestLiteralAttributeValue:
         """
         assert (
             html(Template(f"<div x={quoting}&{quoting}></div>"))
-            == '<div x="&amp;"></div>'
+            == f'<div x="{ENT_BY_CHAR[AMP]}"></div>'
         )
 
     @pytest.mark.parametrize("quoting", ("", "'", '"'))
@@ -152,7 +185,7 @@ class TestLiteralAttributeValue:
     def test_lessthan(self, html, quoting):
         assert (
             html(Template(f"<div x={quoting}<{quoting}></div>"))
-            == '<div x="&lt;"></div>'
+            == f'<div x="{ENT_BY_CHAR[LT]}"></div>'
         )
 
     @pytest.mark.parametrize(
@@ -161,12 +194,12 @@ class TestLiteralAttributeValue:
     def test_greaterthan(self, html, quoting):
         assert (
             html(Template(f"<div x={quoting}>{quoting}></div>"))
-            == '<div x="&gt;"></div>'
+            == f'<div x="{ENT_BY_CHAR[GT]}"></div>'
         )
 
     def test_unquoted_greaterthan(self, html):
         """The parser should interpret the first > as the end of the tag so the following > is treated as text content and escaped."""
-        assert html(Template("<div x=>></div>")) == '<div x="">&gt;</div>'
+        assert html(Template("<div x=>></div>")) == f'<div x="">{ENT_BY_CHAR[GT]}</div>'
 
 
 class TestDynamicAttributeValue:
@@ -175,15 +208,15 @@ class TestDynamicAttributeValue:
     @pytest.mark.parametrize(
         "escaped_char, expected",
         (
-            ("=", "="),
-            ("`", "`"),
+            (EQ, EQ),
+            (BT, BT),
         )  # These are not escaped, but must be wrapped in quotes.
         + (
-            ("'", "&#39;"),
-            ('"', "&#34;"),
-            ("&", "&amp;"),
-            (">", "&gt;"),
-            ("<", "&lt;"),
+           (SQ, ENT_BY_CHAR[SQ]),
+           (DQ, ENT_BY_CHAR[DQ]),
+           (AMP, ENT_BY_CHAR[AMP]),
+           (GT, ENT_BY_CHAR[GT]),
+           (LT, ENT_BY_CHAR[LT]),
         ),  # These must be escaped.
     )
     def test_spread_attr_escaped(self, html, escaped_char, expected):
@@ -193,15 +226,15 @@ class TestDynamicAttributeValue:
     @pytest.mark.parametrize(
         "escaped_char, expected",
         (
-            ("=", "="),
-            ("`", "`"),
+            (EQ, EQ),
+            (BT, BT),
         )  # These are not escaped, but must be wrapped in quotes.
         + (
-            ("'", "&#39;"),
-            ('"', "&#34;"),
-            ("&", "&amp;"),
-            (">", "&gt;"),
-            ("<", "&lt;"),
+           (SQ, ENT_BY_CHAR[SQ]),
+           (DQ, ENT_BY_CHAR[DQ]),
+           (AMP, ENT_BY_CHAR[AMP]),
+           (GT, ENT_BY_CHAR[GT]),
+           (LT, ENT_BY_CHAR[LT]),
         ),  # These must be escaped.
     )
     def test_data_attr_escaped(self, html, escaped_char, expected):
@@ -211,15 +244,15 @@ class TestDynamicAttributeValue:
     @pytest.mark.parametrize(
         "escaped_char, expected",
         (
-            ("=", "="),
-            ("`", "`"),
+            (EQ, EQ),
+            (BT, BT),
         )  # These are not escaped, but must be wrapped in quotes.
         + (
-            ("'", "&#39;"),
-            ('"', "&#34;"),
-            ("&", "&amp;"),
-            (">", "&gt;"),
-            ("<", "&lt;"),
+           (SQ, ENT_BY_CHAR[SQ]),
+           (DQ, ENT_BY_CHAR[DQ]),
+           (AMP, ENT_BY_CHAR[AMP]),
+           (GT, ENT_BY_CHAR[GT]),
+           (LT, ENT_BY_CHAR[LT]),
         ),  # These must be escaped.
     )
     def test_aria_attr_escaped(self, html, escaped_char, expected):
@@ -229,15 +262,15 @@ class TestDynamicAttributeValue:
     @pytest.mark.parametrize(
         "escaped_char, expected",
         (
-            ("=", "="),
-            ("`", "`"),
+            (EQ, EQ),
+            (BT, BT),
         )  # These are not escaped, but must be wrapped in quotes.
         + (
-            ("'", "&#39;"),
-            ('"', "&#34;"),
-            ("&", "&amp;"),
-            (">", "&gt;"),
-            ("<", "&lt;"),
+           (SQ, ENT_BY_CHAR[SQ]),
+           (DQ, ENT_BY_CHAR[DQ]),
+           (AMP, ENT_BY_CHAR[AMP]),
+           (GT, ENT_BY_CHAR[GT]),
+           (LT, ENT_BY_CHAR[LT]),
         ),  # These must be escaped.
     )
     def test_interpolated_escaped(self, html, escaped_char, expected):
@@ -246,15 +279,15 @@ class TestDynamicAttributeValue:
     @pytest.mark.parametrize(
         "escaped_char, expected",
         (
-            ("=", "="),
-            ("`", "`"),
+            (EQ, EQ),
+            (BT, BT),
         )  # These are not escaped, but must be wrapped in quotes.
         + (
-            ("'", "&#39;"),
-            ('"', "&#34;"),
-            ("&", "&amp;"),
-            (">", "&gt;"),
-            ("<", "&lt;"),
+           (SQ, ENT_BY_CHAR[SQ]),
+           (DQ, ENT_BY_CHAR[DQ]),
+           (AMP, ENT_BY_CHAR[AMP]),
+           (GT, ENT_BY_CHAR[GT]),
+           (LT, ENT_BY_CHAR[LT]),
         ),  # These must be escaped.
     )
     def test_templated_escaped(self, html, escaped_char, expected):
@@ -264,24 +297,18 @@ class TestDynamicAttributeValue:
         )
 
 
-TAB = "\t"
-LF = "\u000a"  # \n
-FF = "\u000c"  # \f
-CR = "\u000d"  # \r
-GT = ">"
-SOLIDUS = "\u002f"  # /
+class TestLiteralRawTextPrematureClosing:
+    """Tests for literal premature closing tag or partial closing part in text.
 
+    This applies to all raw text: escapable and unescapable.
 
-class TestLiteralEscapableRawText:
-    """Tests for text that *can* be escaped by entities.
-
-    This text can exist in `TEXTAREA`, `TITLE`, etc.
+    This text can exist in tags: `TEXTAREA`, `TITLE`, `SCRIPT`, `STYLE`, etc.
     """
 
     @pytest.mark.parametrize(
         "trailing_char, tag",
         tuple(
-            (c, t) for c in (TAB, LF, FF, CR, SOLIDUS) for t in ("title", "textarea")
+            (c, t) for c in (TAB, LF, FF, CR, SOLIDUS) for t in ("title", "textarea", "script", "style")
         ),
     )
     @pytest.mark.xfail(reason="Known parsing issue: unparsed input discarded.")
@@ -297,10 +324,43 @@ class TestLiteralEscapableRawText:
             (before, after, tag)
             for before in ("", "a")
             for after in ("", "a")
-            for tag in ("title", "textarea")
+            for tag in ("title", "textarea", "script", "style")
         ),
     )
     def test_cannot_contain_closing_tag_gt(self, html, before, after, tag):
         """Test complete closing tag is not allowed."""
         with pytest.raises(ParsingError):
             _ = html(Template(f"<{tag}>{before}</{tag}>{after}</{tag}>"))
+
+
+class TestDynamicRawTextPrematureClosing:
+    """Tests for dynamic premature closing tag or partial closing part in text.
+
+    This applies to all raw text: escapable and unescapable.
+
+    This text can exist in tags: `TEXTAREA`, `TITLE`, `SCRIPT`, `STYLE`, etc.
+    """
+
+    @pytest.mark.parametrize(
+        "trailing_char, tag",
+        tuple(
+            (c, t) for c in (TAB, LF, FF, CR, SOLIDUS, GT) for t in ("title", "textarea")
+        ),
+    )
+    def test_escapable_mixed_cannot_contain_closing_tag(self, html, trailing_char, tag):
+        """Partial versions of the closing tag are disallowed."""
+        t = Template(f"<{tag}></{tag}") + t'{trailing_char}' + Template(f"</{tag}>")
+        assert html(t) == f'<{tag}>{ENT_BY_CHAR[LT]}/{tag}{ENT_BY_CHAR.get(trailing_char, trailing_char)}</{tag}>'
+
+    @pytest.mark.parametrize(
+        "trailing_char",
+        tuple(
+            (c) for c in (TAB, LF, FF, CR, SOLIDUS, GT)
+        ),
+    )
+    def test_script_mixed_cannot_contain_closing_tag(self, html, trailing_char):
+        """Partial versions of the closing tag are disallowed."""
+        t = t'<script></script{trailing_char}</script>'
+        res = html(t)
+        assert res == f"<script>" + HEX_LT + f"/script{trailing_char}</script>"
+        assert res != f"<script></script{trailing_char}</script>"
