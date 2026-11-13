@@ -21,8 +21,12 @@ from .escaping import (
     escape_html_text as default_escape_html_text,
 )
 from .exc import TemplatingError
-from .format import format_interpolation as base_format_interpolation
-from .format import format_template
+from .format import (
+    format_interpolation as base_format_interpolation,
+)
+from .format import (
+    format_template as base_format_template,
+)
 from .htmlspec import (
     CDATA_CONTENT_ELEMENTS,
     DEFAULT_NORMAL_TEXT_ELEMENT,
@@ -358,12 +362,39 @@ CUSTOM_FORMATTERS = (
     ("callback", _format_callback),
 )
 
+SIMPLE_FORMATTERS = (("callback", _format_callback),)
 
-def format_interpolation(interpolation: Interpolation) -> object:
+
+def format_normal_text_interpolation(interpolation: Interpolation) -> object:
     return base_format_interpolation(
         interpolation,
         formatters=CUSTOM_FORMATTERS,
     )
+
+
+def format_singleton_raw_text_interpolation(interpolation: Interpolation) -> object:
+    return base_format_interpolation(
+        interpolation,
+        formatters=CUSTOM_FORMATTERS,
+    )
+
+
+def format_raw_text_interpolation(interpolation: Interpolation) -> object:
+    return base_format_interpolation(
+        interpolation,
+        formatters=SIMPLE_FORMATTERS,
+    )
+
+
+def format_attr_interpolation(interpolation: Interpolation) -> object:
+    return base_format_interpolation(
+        interpolation,
+        formatters=SIMPLE_FORMATTERS,
+    )
+
+
+def format_attr_template(template: Template) -> str:
+    return base_format_template(template, formatters=SIMPLE_FORMATTERS)
 
 
 # --------------------------------------------------------------------------
@@ -601,7 +632,7 @@ def _resolve_t_attrs(
                         new_attrs[name] = attr_value
                 case TInterpolatedAttribute(name=name, value_i_index=i_index):
                     interpolation = interpolations[i_index]
-                    attr_value = format_interpolation(interpolation)
+                    attr_value = format_attr_interpolation(interpolation)
                     if name in ATTR_ACCUMULATOR_MAKERS:
                         if name not in attr_accs:
                             attr_accs[name] = ATTR_ACCUMULATOR_MAKERS[name](
@@ -615,7 +646,7 @@ def _resolve_t_attrs(
                         new_attrs[name] = attr_value
                 case TTemplatedAttribute(name=name, value_ref=ref):
                     attr_t = ref.bind(interpolations)
-                    attr_value = format_template(attr_t)
+                    attr_value = format_attr_template(attr_t)
                     if name in ATTR_ACCUMULATOR_MAKERS:
                         if name not in attr_accs:
                             attr_accs[name] = ATTR_ACCUMULATOR_MAKERS[name](
@@ -630,7 +661,7 @@ def _resolve_t_attrs(
                         new_attrs[name] = attr_value
                 case TSpreadAttribute(i_index=i_index):
                     interpolation = interpolations[i_index]
-                    spread_value = format_interpolation(interpolation)
+                    spread_value = format_attr_interpolation(interpolation)
                     for sub_k, sub_v in _substitute_spread_attrs(spread_value):
                         if sub_k in ATTR_ACCUMULATOR_MAKERS:
                             if sub_k not in attr_accs:
@@ -1232,7 +1263,9 @@ class TemplateProcessor(ITemplateProcessor):
         @NOTE: This is an interpolation that must be formatted to get the value.
         """
         try:
-            value = format_interpolation(template.interpolations[values_index])
+            value = format_normal_text_interpolation(
+                template.interpolations[values_index]
+            )
             value = t.cast(NormalTextInterpolationValue, value)  # ty: ignore[redundant-cast]
             return self._process_normal_text_from_value(template, last_ctx, value)
         except Exception:
@@ -1295,7 +1328,9 @@ def resolve_text_without_recursion(
     """
     if content_ref.is_singleton:
         try:
-            value = format_interpolation(template.interpolations[content_ref.i_start])
+            value = format_singleton_raw_text_interpolation(
+                template.interpolations[content_ref.i_start]
+            )
             value = t.cast(RawTextExactInterpolationValue, value)  # ty: ignore[redundant-cast]
             if value is None or isinstance(value, bool):
                 return ""
@@ -1324,7 +1359,7 @@ def resolve_text_without_recursion(
                     text.append(part)
                 continue
             try:
-                value = format_interpolation(template.interpolations[part])
+                value = format_raw_text_interpolation(template.interpolations[part])
                 value = t.cast(RawTextInexactInterpolationValue, value)  # ty: ignore[redundant-cast]
                 if value is None or isinstance(value, bool):
                     continue
